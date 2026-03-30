@@ -1,0 +1,13 @@
+{
+  "version": "3.4.9",
+  "released": "2026-03-28",
+  "changelog": [
+    "Migrated to WorkspaceWatchdog GitHub repository",
+    "Fill Blank Geo now handles corrupted or failed geo rows",
+    "Report Generator live search for users and IPs",
+    "Report Generator dropdown fixed for full screen map mode",
+    "Globe travel arcs now curve dynamically based on distance",
+    "Update notification badge added to map title bar",
+    "Update modal with changelog and apply button"
+  ]
+}
