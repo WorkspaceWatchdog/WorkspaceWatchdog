@@ -1,7 +1,8 @@
 {
-  "version": "3.4.9",
+  "version": "3.4.10",
   "released": "2026-03-28",
   "changelog": [
+    "Updated chart colors",
     "Migrated to WorkspaceWatchdog GitHub repository",
     "Fill Blank Geo now handles corrupted or failed geo rows",
     "Report Generator live search for users and IPs",
