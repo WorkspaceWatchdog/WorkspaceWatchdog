@@ -1,7 +1,7 @@
 /* global AdminReports, AdminDirectory */
 /**
  * Licensing.gs — GitHub-based auto-update system, version management,
- *                 and the UPDATER configuration constant.
+ *                 license validation, and the UPDATER configuration constant.
  */
 
 const UPDATER = {
@@ -29,6 +29,55 @@ const UPDATER = {
   PROP_VERSION:    'WW_INSTALLED_VERSION',
   PROP_LAST_CHECK: 'WW_LAST_UPDATE_CHECK'
 };
+
+// ===== License Validation & Storage ==========================================
+
+function validateAndStoreLicense(token) {
+  token = String(token || '').trim();
+  if (!token) return { ok: false, error: 'missing_token' };
+
+  // Derive tier from token prefix
+  var tier = 'unknown';
+  if (token.indexOf('wwt-') === 0)      tier = 'trial';
+  else if (token.indexOf('wwp-') === 0) tier = 'paid';
+  else if (token.indexOf('wwl-') === 0) tier = 'lifetime';
+  else return { ok: false, error: 'invalid_token_format' };
+
+  // Get domain from active user's email
+  var email  = Session.getEffectiveUser().getEmail();
+  var domain = email.split('@')[1] || '';
+  if (!domain) return { ok: false, error: 'could_not_determine_domain' };
+
+  // Call Cloudflare Worker → License Server
+  var workerUrl = 'https://ww-license.wild-credit-7442.workers.dev' +
+    '?action=validate&token=' + encodeURIComponent(token) +
+    '&domain=' + encodeURIComponent(domain);
+
+  try {
+    var resp = UrlFetchApp.fetch(workerUrl, { muteHttpExceptions: true, deadline: 10 });
+    var code = resp.getResponseCode();
+    if (code !== 200) return { ok: false, error: 'worker_http_' + code };
+
+    var data = JSON.parse(resp.getContentText() || '{}');
+    if (!data.success) {
+      return { ok: false, error: data.result || data.error || 'validation_failed' };
+    }
+
+    // Store in Script Properties
+    PropertiesService.getScriptProperties().setProperties({
+      WW_LICENSE_KEY:    token,
+      WW_LICENSE_TIER:   tier,
+      WW_LICENSE_DOMAIN: domain
+    });
+
+    return { ok: true, tier: tier, domain: domain };
+
+  } catch (e) {
+    return { ok: false, error: 'fetch_error: ' + (e.message || String(e)) };
+  }
+}
+
+// ===== Version & Update System ===============================================
 
 function getInstalledVersion() {
   const v = PropertiesService.getScriptProperties().getProperty(UPDATER.PROP_VERSION);
