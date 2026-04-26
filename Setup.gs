@@ -223,7 +223,11 @@ function getWizardConfig() {
     campusIpFilter:   CONFIG.CAMPUS_IP_FILTER || '',
     installed: p.getProperty('INSTALL_COMPLETE') === 'true',
     installVersion: p.getProperty('INSTALL_VERSION') || '',
-    installTimestamp: p.getProperty('INSTALL_TIMESTAMP') || ''
+    installTimestamp: p.getProperty('INSTALL_TIMESTAMP') || '',
+    // License
+    licenseToken:  p.getProperty('WW_LICENSE_KEY')    || '',
+    licenseTier:   p.getProperty('WW_LICENSE_TIER')   || '',
+    licenseDomain: p.getProperty('WW_LICENSE_DOMAIN') || ''
   };
 }
 
@@ -369,7 +373,9 @@ function _saveSetupSummaryToSheet_() {
     ['CHAT_ALERT_ON_OUTSIDE_US',     cfg.chatAlertOnOutsideUS     ? 'TRUE' : 'FALSE'],
     ['CHAT_ALERT_ON_IMPOSSIBLE_TRAVEL', cfg.chatAlertOnImpossibleTravel ? 'TRUE' : 'FALSE'],
     ['CHAT_ALERT_ON_BURST',          cfg.chatAlertOnBurst         ? 'TRUE' : 'FALSE'],
-    ['CHAT_ALERT_SCHEDULED_ONLY',    cfg.chatAlertScheduledOnly   ? 'TRUE' : 'FALSE']
+    ['CHAT_ALERT_SCHEDULED_ONLY',    cfg.chatAlertScheduledOnly   ? 'TRUE' : 'FALSE'],
+    ['LICENSE_TIER',                 cfg.licenseTier  || '(none)'],
+    ['LICENSE_DOMAIN',               cfg.licenseDomain || '(none)']
   ];
   const existingRows = Math.max(sh.getMaxRows() - 7, 1);
   sh.getRange(8, 1, existingRows, 2).clearContent();
