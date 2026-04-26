@@ -103,7 +103,7 @@ const DIAG_HEADERS = [
   'WindowStartISO','WindowEndISO'
 ];
 
-const WW_MONITOR_VERSION = '3.5.00';
+const WW_MONITOR_VERSION = '3.5.1';
 
 // ===== KeyIndex Sheet =========================================================
 const KEY_INDEX_SHEET = 'KeyIndex';
