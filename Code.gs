@@ -2,8 +2,7 @@
 /**
 /* global AdminReports, AdminDirectory */
 /**
- * Workspace Watchdog v3.5.1
- * v3.5.1 — Added license activation to Setup Wizard.
+ * Workspace Watchdog v3.5.3
  * Code.gs — Entry points only: onOpen menu, onInstall, doGet, scheduledSync trigger.
  * All heavy lifting delegated to dedicated system files:
  *   Utils.gs      — CONFIG, constants, headers, cache indexes, shared helpers
