@@ -91,9 +91,11 @@ const SUSP_HEADERS  = [
   'From City','From Region','From Country','From LatLng',
   'To City','To Region','To Country','To LatLng',
   'Distance (mi)','Speed (mph)','EventKey A','EventKey B',
-  'SuspNoTZ','HourBucket','Severity','Alerted'
+  'SuspNoTZ','HourBucket','Severity',
+  'From IP','From ISP','To IP','To ISP',
+  'Alerted'
 ];
-const SUSP_ALERTED_COL = 19; // 1-based column index of Alerted
+const SUSP_ALERTED_COL = 24; // 1-based column index of Alerted
 
 const DIAG_HEADERS = [
   'Trigger','Start (CT)','End (CT)','Events Parsed','Rows Appended','Notes',
@@ -103,7 +105,7 @@ const DIAG_HEADERS = [
   'WindowStartISO','WindowEndISO'
 ];
 
-const WW_MONITOR_VERSION = '3.5.1';
+const WW_MONITOR_VERSION = '3.5.00';
 
 // ===== KeyIndex Sheet =========================================================
 const KEY_INDEX_SHEET = 'KeyIndex';
