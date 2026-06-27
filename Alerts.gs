@@ -58,6 +58,7 @@ function _sendAlertOnce_(cacheKey, text) {
 }
 
 function _alertsEnabled_(triggerName) {
+  if (_getLicenseState_().phase === 'shutdown') return false;
   if (!PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL')) return false;
   if (CONFIG.CHAT_ALERT_SCHEDULED_ONLY && triggerName !== 'scheduledSync') return false;
   return true;
@@ -303,12 +304,17 @@ function _isWhitelisted_(email, ip) {
 }
 
 function saveWhitelist(raw) {
-  const entries = String(raw || '').replace(/,/g, '\n').split('\n').map(e => e.trim()).filter(Boolean);
+  const lines = String(raw || '').replace(/,/g, '\n').split('\n')
+    .map(e => e.trim().toLowerCase()).filter(Boolean);
+
+  const entries  = lines.filter(e => _isValidWhitelistEntry_(e));
+  const rejected = lines.filter(e => !_isValidWhitelistEntry_(e));
+
   PropertiesService.getScriptProperties().setProperty('SUSPICIOUS_WHITELIST', entries.join('\n'));
   __WHITELIST = null;
   const emails = entries.filter(e => e.includes('@')).length;
   const ips    = entries.length - emails;
-  return { ok: true, emailCount: emails, ipCount: ips };
+  return { ok: true, emailCount: emails, ipCount: ips, rejected: rejected };
 }
 
 function getWhitelist() {
@@ -316,6 +322,7 @@ function getWhitelist() {
 }
 
 function removeFromWhitelist(entry) {
+  _requireAllowedUser_();
   if (!entry) return { ok: false };
   const p   = PropertiesService.getScriptProperties();
   const raw = p.getProperty('SUSPICIOUS_WHITELIST') || '';
@@ -325,9 +332,23 @@ function removeFromWhitelist(entry) {
   return { ok: true, remaining: cleaned.length };
 }
 
+// Accepts only a plain email address or a plain IPv4/IPv6 address — anything
+// else is rejected before it ever reaches storage or the Live Map's
+// whitelist manager UI.
+function _isValidWhitelistEntry_(entry) {
+  const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+  const IPV4_RE  = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+  const IPV6_RE  = /^[0-9A-Fa-f:]+:[0-9A-Fa-f:]+$/;
+  return EMAIL_RE.test(entry) || IPV4_RE.test(entry) || IPV6_RE.test(entry);
+}
+
 function addToWhitelistFromMap(entry) {
+  _requireAllowedUser_();
   if (!entry || !String(entry).trim()) return { ok: false, message: 'Empty entry.' };
   entry = String(entry).trim().toLowerCase();
+  if (!_isValidWhitelistEntry_(entry)) {
+    return { ok: false, message: entry + ' is not a valid email address or IP address.' };
+  }
   const p   = PropertiesService.getScriptProperties();
   const raw = p.getProperty('SUSPICIOUS_WHITELIST') || '';
   const existing = raw.replace(/,/g, '\n').split('\n')

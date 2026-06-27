@@ -131,10 +131,28 @@
     .view-opt .view-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
     .view-opt.active .view-dot { background: var(--accent); box-shadow: var(--glow-blue); }
     .tb-sep { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+    /* #tbLeft / #tbRight are kept at equal width by syncToolbarHalves() (JS),
+       which measures each side's real content width and applies the larger
+       one as a shared flex-basis to both. That's what keeps #tbScoreGroup
+       genuinely centered on the toolbar — fixed equal-halves alone clipped
+       the wider side's content (e.g. the texture dropdown cut to "Nigh"),
+       and flex-grow spacers alone centered between the two sides instead of
+       on the container, drifting off-center whenever one side had more
+       controls than the other (e.g. globe mode's extra rotate/texture
+       controls on the left). overflow:hidden remains only as a last-resort
+       safety net for windows too narrow to fit both sides at their natural
+       width even when synced.
+       Previously #tbScoreGroup was absolutely centered on #toolbar itself,
+       which collided with the left controls once globe mode added the
+       rotate/texture dropdowns (worse on narrower/lower-resolution screens). */
+    #tbLeft, #tbRight {
+      display: flex; align-items: center; gap: 6px;
+      flex: 1 1 auto; min-width: 0; overflow: hidden;
+    }
+    #tbRight { justify-content: flex-end; }
     #tbScoreGroup {
-      position: absolute; left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; height: 100%;
-      pointer-events: auto; z-index: 10;
+      flex-shrink: 0;
       background: linear-gradient(90deg, transparent 0%, #060a14f2 8%, #060a14f2 92%, transparent 100%);
     }
     .tb-sc { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px; border-left: 1px solid var(--border); min-width: 52px; height: 100%; }
@@ -176,6 +194,35 @@
     #main { display: flex; flex: 1; overflow: hidden; position: relative; clip-path: inset(0); min-height: 0; }
     #map { flex: 1; }
     #globe-container { position: absolute; inset: 0; display: none; z-index: 5; }
+
+    /* ── License expiry banner ────────────────────────────────────────────
+       Sibling of #map / #globe-container inside #main (position:relative),
+       same pattern as #globeAlertPanel below — keeps it above both modes. */
+    #licenseBanner {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      z-index: 1500;
+      padding: 8px 16px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      align-items: center; justify-content: center; gap: 12px;
+      text-align: center;
+      border-bottom: 1px solid;
+    }
+    #licenseBanner.visible { display: flex; }
+    #licenseBanner.warn {
+      background: rgba(255,170,0,0.15); color: var(--yellow); border-color: var(--yellow);
+    }
+    #licenseBanner.expired {
+      background: rgba(255,59,92,0.18); color: var(--red); border-color: var(--red);
+      box-shadow: var(--glow-red);
+    }
+    #licenseBanner .lb-close {
+      background: none; border: 1px solid currentColor; color: inherit;
+      border-radius: 4px; font-size: 11px; padding: 2px 8px; cursor: pointer;
+      font-family: 'Share Tech Mono', monospace;
+    }
 
     /* ── Globe Suspicious Overlay Panel ─────────────────────────────────── */
     #globeAlertPanel {
@@ -515,6 +562,7 @@
 
 <div id="toolbar">
 
+<div id="tbLeft">
   <!-- View mode dropdown -->
   <div id="viewDropWrap">
     <button id="viewDropBtn" onclick="toggleViewDrop()">
@@ -566,8 +614,9 @@
       <option value="black">⬛ Pure Black</option>
     </select>
   </div>
+</div>
 
-  <!-- Centered scorecards — absolutely positioned so they stay centered regardless of controls on either side -->
+  <!-- Centered scorecards — kept centered by syncToolbarHalves() (JS), which equalizes #tbLeft/#tbRight widths so this sits exactly in the middle -->
   <div id="tbScoreGroup">
     <div class="tb-sc">
       <span class="tb-sc-label">Events</span>
@@ -599,9 +648,7 @@
     </div>
   </div>
 
-  <!-- Spacer pushes right-side controls to the right -->
-  <div style="flex:1;"></div>
-
+  <div id="tbRight">
   <!-- Auto refresh controls -->
   <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;font-family:'Share Tech Mono',monospace;color:var(--text2);letter-spacing:.06em;">
     <input type="checkbox" id="chkAuto" onchange="toggleAuto()" checked> AUTO
@@ -622,6 +669,7 @@
 
   <!-- Gear — opens filter drawer -->
   <button id="btnGear" onclick="toggleFilterDrawer()" title="Filters &amp; Tools">&#9881;</button>
+  </div>
 
 </div>
 
@@ -653,6 +701,7 @@
 <!-- scorecards row removed -->
 
 <div id="main">
+  <div id="licenseBanner"></div>
   <div id="map"></div>
   <div id="globe-container"></div>
 
@@ -780,8 +829,30 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 }).addTo(map);
 arcLayer = L.layerGroup().addTo(map);
 
+// Check license phase immediately — don't wait on getLiveMapData()'s
+// licenseLocked flag, which only fires once the map is already disabled.
+checkLicenseBanner();
+
+// Keeps #tbScoreGroup genuinely centered on the toolbar by measuring each
+// side's real content width and applying the larger one as a shared
+// flex-basis to both — equal-width sides is what makes the middle element
+// sit on the true center, regardless of which side currently has more
+// controls (e.g. globe mode's rotate/texture dropdowns on the left).
+function syncToolbarHalves() {
+  var left = document.getElementById('tbLeft');
+  var right = document.getElementById('tbRight');
+  if (!left || !right) return;
+  left.style.flexBasis = 'auto';
+  right.style.flexBasis = 'auto';
+  var w = Math.max(left.scrollWidth, right.scrollWidth);
+  left.style.flexBasis = w + 'px';
+  right.style.flexBasis = w + 'px';
+}
+window.addEventListener('resize', syncToolbarHalves);
+
 // THEN load data and OUs after map is ready
 window.onload = function() {
+  syncToolbarHalves();
   setTimeout(function() {
     map.invalidateSize();
     loadOUs();
@@ -813,6 +884,67 @@ function dismissSplash() {
   setTimeout(function() {
     splash.style.display = 'none';
   }, 650);
+}
+
+// ── License expiry banner ─────────────────────────────────────────────────
+
+function checkLicenseBanner() {
+  google.script.run
+    .withSuccessHandler(renderLicenseBanner)
+    .withFailureHandler(function() {})
+    .getLicenseStateForClient();
+}
+
+function renderLicenseBanner(state) {
+  if (!state) return;
+  var el = document.getElementById('licenseBanner');
+  if (!el) return;
+
+  var dismissible = true;
+  var cls = 'warn';
+  var msg = '';
+
+  switch (state.phase) {
+    case 'warn15':
+    case 'warn7':
+      msg = '⚠ Your Workspace Watchdog license expires in ' + state.daysUntil +
+        ' day' + (state.daysUntil === 1 ? '' : 's') + ' (' + state.expiresOn + ').';
+      break;
+    case 'warn1':
+      msg = '⚠ Your Workspace Watchdog license expires ' +
+        (state.daysUntil === 0 ? 'today' : 'tomorrow') + ' (' + state.expiresOn + ').';
+      break;
+    case 'mapLocked':
+      dismissible = false;
+      cls = 'expired';
+      msg = '⚠ Your license expired on ' + state.expiresOn +
+        '. Renew now — the Live Map will be disabled once the grace period ends.';
+      break;
+    case 'shutdown':
+      dismissible = false;
+      cls = 'expired';
+      msg = '⚠ License expired — grace period has ended. Renew at workspacewatchdog.com to restore service.';
+      break;
+    default:
+      el.classList.remove('visible');
+      return;
+  }
+
+  // Dismissible banners stay dismissed for this phase/day until the phase advances
+  var dismissKey = 'ww_license_banner_dismissed_' + state.phase + '_' + state.expiresOn;
+  if (dismissible && sessionStorage.getItem(dismissKey)) {
+    el.classList.remove('visible');
+    return;
+  }
+
+  el.className = 'visible ' + cls;
+  el.innerHTML = '<span>' + msg + '</span>' +
+    (dismissible ? '<button class="lb-close" onclick="dismissLicenseBanner(\'' + dismissKey + '\')">Dismiss</button>' : '');
+}
+
+function dismissLicenseBanner(key) {
+  sessionStorage.setItem(key, '1');
+  document.getElementById('licenseBanner').classList.remove('visible');
 }
 
 // ── Update Notifications ─────────────────────────────────────────────────────
@@ -1612,7 +1744,7 @@ function fld(label, val, copyable) {
   return h + '</div>';
 }
 function cp(t) { navigator.clipboard.writeText(t); }
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function setLoading(on) { document.getElementById('loadingMsg').textContent = on ? 'Loading...' : ''; }
 function showErr(e) {
   var msg = 'Error: ' + (e.message || String(e));
@@ -2473,7 +2605,12 @@ function wlAddEntry() {
   status.style.color = 'var(--text2)';
   status.textContent = 'Adding...';
   google.script.run
-    .withSuccessHandler(function() {
+    .withSuccessHandler(function(res) {
+      if (!res || !res.ok) {
+        status.style.color = 'var(--red)';
+        status.textContent = 'Rejected — not a valid email or IP';
+        return;
+      }
       status.style.color = 'var(--green)';
       status.textContent = 'Added: ' + entry;
       input.value = '';
@@ -2649,6 +2786,7 @@ function toggleGlobeView() {
   // Toolbar controls
   document.getElementById('rotateWrap').style.display  = on ? 'flex' : 'none';
   document.getElementById('textureWrap').style.display = on ? 'flex' : 'none';
+  syncToolbarHalves(); // left side just gained/lost the rotate/texture controls
 
   if (on) {
     // ── Entering globe view ──────────────────────────────────────────────

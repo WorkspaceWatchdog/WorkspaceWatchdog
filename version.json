@@ -1,9 +1,9 @@
 {
-  "version": "3.5.3",
+  "version": "3.6.2",
+  "released": "2026-06-20",
   "changelog": [
-    "Added IP address and ISP information to Suspicious sheet (From IP, From ISP, To IP, To ISP columns)",
-    "IP and ISP now included in Impossible Travel and Login Burst alert notifications",
-    "Suspicious sheet migration automatically runs on first sync after update",
-    "Fixed getSuspiciousMapData to pass IP/ISP through to LiveMap for future use"
+    "Fixed stored XSS vulnerability in the Suspicious Event Whitelist, affecting both the Live Map's Add button and the Settings textarea editor",
+    "Added per-call authorization checks so removing a user from the allowed list takes effect immediately, instead of only on their next page load",
+    "IPinfo token and license key are no longer sent to the browser in plaintext — Settings and Setup Wizard now show a Set/Not Set indicator instead"
   ]
 }

@@ -202,7 +202,7 @@ function getWizardConfig() {
     cacheWarmupBatchIp: CONFIG.CACHE_WARMUP_BATCH_IP,
     cacheWarmupBatchUser: CONFIG.CACHE_WARMUP_BATCH_USER,
     cacheWarmupIntervalMinutes: CONFIG.CACHE_WARMUP_INTERVAL_MINUTES,
-    ipinfoToken: p.getProperty('IPINFO_TOKEN') || '',
+    ipinfoTokenSet: !!p.getProperty('IPINFO_TOKEN'),
     monitorOUs: CONFIG.MONITOR_OUS || '',
     bulkOuLoad: CONFIG.BULK_OU_LOAD !== false,
     chatWebhookSet: !!(PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL')),
@@ -221,13 +221,17 @@ function getWizardConfig() {
     digestEmailTo:      CONFIG.DIGEST_EMAIL_TO,
     digestHour:       CONFIG.DIGEST_HOUR,
     campusIpFilter:   CONFIG.CAMPUS_IP_FILTER || '',
+    ignoreMobileImpossibleTravel: CONFIG.IGNORE_MOBILE_IMPOSSIBLE_TRAVEL,
+    mobileIspList: CONFIG.MOBILE_ISP_LIST || '',
     installed: p.getProperty('INSTALL_COMPLETE') === 'true',
     installVersion: p.getProperty('INSTALL_VERSION') || '',
     installTimestamp: p.getProperty('INSTALL_TIMESTAMP') || '',
     // License
-    licenseToken:  p.getProperty('WW_LICENSE_KEY')    || '',
+    licenseTokenSet: !!p.getProperty('WW_LICENSE_KEY'),
     licenseTier:   p.getProperty('WW_LICENSE_TIER')   || '',
-    licenseDomain: p.getProperty('WW_LICENSE_DOMAIN') || ''
+    licenseDomain: p.getProperty('WW_LICENSE_DOMAIN') || '',
+    licenseExpires: p.getProperty('WW_LICENSE_EXPIRES') || '',
+    licensePhase:   _getLicenseState_().phase
   };
 }
 
@@ -256,7 +260,6 @@ function saveWizardConfig(form) {
     CACHE_WARMUP_BATCH_IP: cleanNum(form.cacheWarmupBatchIp, 10),
     CACHE_WARMUP_BATCH_USER: cleanNum(form.cacheWarmupBatchUser, 10),
     CACHE_WARMUP_INTERVAL_MINUTES: cleanNum(form.cacheWarmupIntervalMinutes, 5),
-    IPINFO_TOKEN:   String(form.ipinfoToken || ''),
     MONITOR_OUS:    String(form.monitorOUs   || ''),
     BULK_OU_LOAD:   cleanBool(form.bulkOuLoad),
     CHAT_ALERT_DEDUPE_HOURS:         cleanNum(form.chatAlertDedupeHours, 12),
@@ -273,10 +276,15 @@ function saveWizardConfig(form) {
     DIGEST_COMPARISON:               cleanBool(form.digestComparison),
     DIGEST_EMAIL_TO:                 String(form.digestEmailTo || '').trim(),
     DIGEST_HOUR:                     cleanNum(form.digestHour, 7),
-    CAMPUS_IP_FILTER:                String(form.campusIpFilter || '').trim()
+    CAMPUS_IP_FILTER:                String(form.campusIpFilter || '').trim(),
+    IGNORE_MOBILE_IMPOSSIBLE_TRAVEL: cleanBool(form.ignoreMobileImpossibleTravel),
+    MOBILE_ISP_LIST:                 String(form.mobileIspList || '').trim()
   });
   if (form.chatWebhookUrl && form.chatWebhookUrl.trim()) {
     PropertiesService.getScriptProperties().setProperty('CHAT_WEBHOOK_URL', form.chatWebhookUrl.trim());
+  }
+  if (form.ipinfoToken && form.ipinfoToken.trim()) {
+    PropertiesService.getScriptProperties().setProperty('IPINFO_TOKEN', form.ipinfoToken.trim());
   }
   _applyRuntimeConfig_();
   _ensureSetupSheet_();
@@ -357,6 +365,8 @@ function _saveSetupSummaryToSheet_() {
     ['BURST_WINDOW_MIN', cfg.burstWindowMin],
     ['IMPOSSIBLE_MIN_MILES', cfg.impossibleMinMiles],
     ['IMPOSSIBLE_MPH', cfg.impossibleMph],
+    ['IGNORE_MOBILE_IMPOSSIBLE_TRAVEL', cfg.ignoreMobileImpossibleTravel ? 'TRUE' : 'FALSE'],
+    ['MOBILE_ISP_LIST', cfg.mobileIspList || '(none selected)'],
     ['GEO_TTL_HOURS', cfg.geoTtlHours],
     ['OU_TTL_HOURS', cfg.ouTtlHours],
     ['KEEP_DAYS', cfg.keepDays],
@@ -365,7 +375,7 @@ function _saveSetupSummaryToSheet_() {
     ['CACHE_WARMUP_BATCH_IP', cfg.cacheWarmupBatchIp],
     ['CACHE_WARMUP_BATCH_USER', cfg.cacheWarmupBatchUser],
     ['CACHE_WARMUP_INTERVAL_MINUTES', cfg.cacheWarmupIntervalMinutes],
-    ['IPINFO_TOKEN_SET',  cfg.ipinfoToken  ? 'Yes' : 'No'],
+    ['IPINFO_TOKEN_SET',  cfg.ipinfoTokenSet  ? 'Yes' : 'No'],
     ['MONITOR_OUS',                  cfg.monitorOUs   || '(all)'],
     ['BULK_OU_LOAD',                 cfg.bulkOuLoad   ? 'TRUE' : 'FALSE'],
     ['CHAT_WEBHOOK_SET',             cfg.chatWebhookSet ? 'Yes' : 'No'],
@@ -417,6 +427,16 @@ function trimSetupSheet(keepEntries) {
 }
 
 function showLiveMap() {
+  const state = _getLicenseState_();
+  if (state.phase === 'mapLocked' || state.phase === 'shutdown') {
+    SpreadsheetApp.getUi().alert(
+      'Live Map Unavailable',
+      'Your license expired on ' + state.expiresOn + '. The Live Map is disabled until a renewed ' +
+      'license is activated.\n\nVisit workspacewatchdog.com to renew, or open the Setup Wizard to enter a new token.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
   const html = HtmlService.createHtmlOutputFromFile('LiveMap')
     .setTitle('Workspace Watchdog - Live Map')
     .setWidth(2000)

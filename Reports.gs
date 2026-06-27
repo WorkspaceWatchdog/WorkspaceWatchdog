@@ -8,6 +8,7 @@
 
 function dailyDigest() {
   _applyRuntimeConfig_();
+  if (_getLicenseState_().phase === 'shutdown') return;
   const chatEnabled  = CONFIG.DIGEST_ENABLED;
   const emailEnabled = CONFIG.DIGEST_EMAIL_ENABLED;
   if (!chatEnabled && !emailEnabled) return;
@@ -178,6 +179,7 @@ function _sendDigestEmail_(data) {
 
 function weeklyReport() {
   _applyRuntimeConfig_();
+  if (_getLicenseState_().phase === 'shutdown') return;
   if (!CONFIG.WEEKLY_REPORT_ENABLED) return;
   if (!CONFIG.DIGEST_EMAIL_ENABLED) return;
   const dayOfWeek = Number(Utilities.formatDate(new Date(), CONFIG.TZ, 'u'));
@@ -289,6 +291,7 @@ function _sendWeeklyEmail_(data) {
 // ===== On-Demand Reports ======================================================
 
 function getReportFilterOptions() {
+  _requireAllowedUser_();
   _applyRuntimeConfig_();
   const ss     = SpreadsheetApp.getActive();
   const shMain = ss.getSheetByName(CONFIG.MAIN);
@@ -300,6 +303,7 @@ function getReportFilterOptions() {
 }
 
 function searchReportFilter(type, query) {
+  _requireAllowedUser_();
   _applyRuntimeConfig_();
   if (!query || query.length < 2) return [];
   const ss     = SpreadsheetApp.getActive();
@@ -318,6 +322,7 @@ function searchReportFilter(type, query) {
 }
 
 function getReportData(reportType, filterValue, daysBack) {
+  _requireAllowedUser_();
   _applyRuntimeConfig_();
   const ss      = SpreadsheetApp.getActive();
   const shMain  = ss.getSheetByName(CONFIG.MAIN);
@@ -393,6 +398,7 @@ function getReportData(reportType, filterValue, daysBack) {
 
 function getReportCSV(reportType, filterValue, daysBack) {
   try {
+    _requireAllowedUser_();
     const data = getReportData(reportType, filterValue, daysBack);
     const lines = [];
     if (reportType === 'suspicious') {
@@ -416,6 +422,7 @@ function getReportCSV(reportType, filterValue, daysBack) {
 
 function sendReportEmail(reportType, filterValue, daysBack, recipientEmail) {
   try {
+    _requireAllowedUser_();
     const data  = getReportData(reportType, filterValue, daysBack);
     const owner = Session.getEffectiveUser().getEmail();
     const to    = recipientEmail && recipientEmail.trim() ? recipientEmail.trim() : owner;
