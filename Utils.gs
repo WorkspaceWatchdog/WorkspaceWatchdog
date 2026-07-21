@@ -78,7 +78,8 @@ let CONFIG = {
 function _mobileIspSet_() {
   const raw = String(CONFIG.MOBILE_ISP_LIST || '');
   const set = new Set();
-  raw.split(',').forEach(s => {
+  // Pipe delimiter — commas appear in ISP names (e.g. "T-Mobile USA, Inc.")
+  raw.split('|').forEach(s => {
     const v = s.trim().toLowerCase();
     if (v) set.add(v);
   });
