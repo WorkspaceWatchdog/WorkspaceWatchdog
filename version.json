@@ -1,10 +1,14 @@
 {
-  "version": "3.6.3",
-  "released": "2026-07-16",
+  "version": "3.7.0",
+  "released": "2026-08-31",
   "changelog": [
-    "Added mobile/cellular carrier filtering for Impossible Travel — select which ISPs to ignore in Settings to suppress false positives caused by carrier IP reassignment across cell towers",
-    "Added license expiration enforcement with tiered grace periods — warning banners at 15, 7, and 1 day before expiration; Live Map disabled at expiration; full monitoring pause after grace period ends",
-    "License state now refreshes automatically via the sync trigger, not only when the sheet is opened",
-    "Fixed Impossible Travel false positives caused by AT&T, T-Mobile, Verizon, and other carrier-grade-NAT IP pools being misidentified as cross-country travel"
+    "Added U.S. Safe States monitoring: successful U.S. logins from states not on the configured Safe States list can now be flagged as suspicious and sent to Google Chat",
+    "Added optional cellular/wireless ISP suppression for Safe States monitoring using the existing wireless-provider exclusion list",
+    "Added a State Monitoring activation cutoff so existing historical login rows are not retroactively flagged when the feature is first enabled",
+    "Improved wireless-provider list handling so ISP names containing commas are preserved correctly",
+    "Preserved existing Script Properties during guided install/repair so saved settings such as the Google Chat webhook are not erased",
+    "Improved guided-install diagnostics, trigger health checks, and automatic retry of failed geolocation lookups",
+    "Preserved the Impossible Travel null-island protection for missing or invalid geolocation data",
+    "Updated the Live Map to use the key-free OpenStreetMap basemap so the map no longer displays API KEY REQUIRED tiles"
   ]
 }
