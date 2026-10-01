@@ -5,10 +5,38 @@
 
 function scheduledSync() {
   _applyRuntimeConfig_();
+
+  // Keep license state fresh even on sheets that run unattended for days at
+  // a time — onOpen() alone can't be relied on for that. This is throttled
+  // internally to ~once per 20 hours, so calling it on every sync run is safe.
+  try { _maybeRevalidateLicense_(); } catch (e) { /* never let this block sync */ }
+
+  var state = _getLicenseState_();
+  if (_isLicenseProductBlocked_(state)) {
+    _logLicenseSkipOncePerDay_(state);
+    return;
+  }
+
   _syncCore('scheduledSync');
 }
 
+// Logs a single diagnostics row per day while sync is skipped due to license
+// shutdown, instead of one row per trigger firing (which could be every few
+// minutes for weeks on an unattended sheet).
+function _logLicenseSkipOncePerDay_(state) {
+  var p = PropertiesService.getScriptProperties();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var lastLogged = p.getProperty('WW_SYNC_SKIP_LOGGED');
+  if (lastLogged === today) return;
+  p.setProperty('WW_SYNC_SKIP_LOGGED', today);
+  var reason = state.phase === 'unlicensed'
+    ? 'Sync skipped — no active license is installed.'
+    : 'Sync skipped — license expired since ' + state.expiresOn + ', grace period ended.';
+  _logDiagnostics('scheduledSync', new Date(), new Date(), 0, 0, reason, {});
+}
+
 function _syncCore(triggerName) {
+  _requireLicensed_();
   _resetAllCaches_();
   const __ouMap = __getOUMap();
   const t0 = new Date();
@@ -107,7 +135,10 @@ function _syncCore(triggerName) {
           const rowTs       = new Date(sheetRow[0]);
           const g           = geoMap[rowIp] || {};
           const r           = { email: rowEmail, eventName: rowEventName, ip: rowIp, key: rowKey, ts: rowTs };
-          if (!_isWhitelisted_(r.email, r.ip)) _maybeAlertOutsideUS_(triggerName, r, g);
+          if (!_isWhitelisted_(r.email, r.ip)) {
+            _maybeAlertOutsideUS_(triggerName, r, g);
+            _maybeAlertOutsideSafeStates_(triggerName, r, g);
+          }
         });
       }
       rowsAppended = newRows.length;
@@ -259,7 +290,7 @@ function _fetchTokenEvents_(startU, endU) {
   let page;
   do {
     if (page) params.pageToken = page;
-    const resp = AdminReports.Activities.list('all', 'token', params);
+    const resp = _reportsListSafe_('all', 'token', params);
     const items = (resp && resp.items) || [];
     for (let i = 0; i < items.length; i++) {
       const a = items[i];
@@ -284,6 +315,7 @@ function _latestLoginRowForEmail_(email, allObjs) {
 function backfillFourDays() { backfillDays(4, 6); }
 
 function backfillDays(days, chunkHours) {
+  _requireLicensed_();
   _applyRuntimeConfig_();
   const __ouMap = __getOUMap();
   days = Number(days) || 4;
@@ -376,6 +408,7 @@ function backfillDays(days, chunkHours) {
 }
 
 function cacheWarmup() {
+  if (_isLicenseProductBlocked_(_getLicenseState_())) return;
   _applyRuntimeConfig_();
   const ss = SpreadsheetApp.getActive();
   const main = ss.getSheetByName(CONFIG.MAIN);

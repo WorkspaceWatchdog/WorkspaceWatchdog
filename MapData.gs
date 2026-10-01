@@ -5,7 +5,12 @@
  */
 
 function getLiveMapData(opts) {
+  _requireAllowedUser_();
   _applyRuntimeConfig_();
+  const licensePhase = _getLicenseState_().phase;
+  if (licensePhase === 'unlicensed' || licensePhase === 'mapLocked' || licensePhase === 'shutdown') {
+    return { rows: [], total: 0, licenseLocked: true };
+  }
   opts = opts || {};
   const maxRows   = Number(opts.maxRows)  || 2000;
   const eventType = opts.eventType        || 'all';
@@ -82,6 +87,8 @@ function getLiveMapData(opts) {
 }
 
 function getActiveNowMapData() {
+  _requireAllowedUser_();
+  _requireMapLicense_();
   _applyRuntimeConfig_();
   const ss   = SpreadsheetApp.getActive();
   const shAN = ss.getSheetByName(CONFIG.ACTIVE);
@@ -118,6 +125,8 @@ function getActiveNowMapData() {
 }
 
 function getSuspiciousMapData() {
+  _requireAllowedUser_();
+  _requireMapLicense_();
   _applyRuntimeConfig_();
   const ss     = SpreadsheetApp.getActive();
   const shSusp = ss.getSheetByName(CONFIG.SUSPICIOUS);
@@ -156,6 +165,10 @@ function getSuspiciousMapData() {
     const keyA    = String(r[14] || '');
     const keyB    = String(r[15] || '');
     const severity= r[18];
+    const fromIp  = String(r[19] || '');
+    const fromIsp = String(r[20] || '');
+    const toIp    = String(r[21] || '');
+    const toIsp   = String(r[22] || '');
 
     let resolvedLL = fromLL;
     if (!resolvedLL || !resolvedLL.includes(',')) {
@@ -163,16 +176,16 @@ function getSuspiciousMapData() {
     }
 
     rows.push({ ts, email, reason, details,
-                fromCity, fromReg, fromCo, fromLL: resolvedLL,
-                toCity, toReg, toCo, toLL, dist, speed, severity });
+                fromIp, fromIsp, fromCity, fromReg, fromCo, fromLL: resolvedLL,
+                toIp, toIsp, toCity, toReg, toCo, toLL, dist, speed, severity });
 
     if (reason === 'Impossible Travel' && fromLL && toLL &&
         fromLL.includes(',') && toLL.includes(',')) {
       const fp = fromLL.split(','), tp = toLL.split(',');
       arcs.push({
         email, details, dist, speed,
-        from: { lat: Number(fp[0]), lon: Number(fp[1]), city: fromCity, region: fromReg, country: fromCo },
-        to:   { lat: Number(tp[0]), lon: Number(tp[1]), city: toCity,   region: toReg,   country: toCo   }
+        from: { lat: Number(fp[0]), lon: Number(fp[1]), ip: fromIp, isp: fromIsp, city: fromCity, region: fromReg, country: fromCo },
+        to:   { lat: Number(tp[0]), lon: Number(tp[1]), ip: toIp,   isp: toIsp,   city: toCity,   region: toReg,   country: toCo   }
       });
     }
   }
@@ -181,6 +194,8 @@ function getSuspiciousMapData() {
 }
 
 function getActiveNowCount() {
+  _requireAllowedUser_();
+  _requireMapLicense_();
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(CONFIG.ACTIVE);
   if (!sh || sh.getLastRow() <= 1) return 0;
@@ -188,26 +203,36 @@ function getActiveNowCount() {
 }
 
 function getLastSyncTime() {
+  _requireAllowedUser_();
+  _requireMapLicense_();
   const p = PropertiesService.getScriptProperties();
   return p.getProperty('lastSyncWallTime') || p.getProperty('lastRunISO') || '';
 }
 
 function getMapOUList() {
+  _requireAllowedUser_();
+  _requireMapLicense_();
   _applyRuntimeConfig_();
   const res = getMonitorableOUs();
   return res.ous || [];
 }
 
 function getMapNotifications() {
+  _requireAllowedUser_();
   const props = PropertiesService.getScriptProperties();
+  // License fields derive from _getLicenseState_() — the same single source of
+  // truth the in-page banner uses (getLicenseStateForClient) — so the title-bar
+  // badge and the banner always agree. warn15/warn7/warn1 → expiring;
+  // mapLocked/shutdown → expired; active/lifetime/unlicensed → neither.
+  const licState = _getLicenseState_();
   const result = {
     updateAvailable:  false,
     latestVersion:    null,
     installedVersion: getInstalledVersion(),
-    licenseExpiring:  false,
-    licenseExpired:   false,
-    licenseDaysLeft:  null,
-    licenseTier:      props.getProperty('WW_LICENSE_TIER') || 'free'
+    licenseExpiring:  licState.phase === 'warn15' || licState.phase === 'warn7' || licState.phase === 'warn1',
+    licenseExpired:   licState.phase === 'unlicensed' || licState.phase === 'mapLocked' || licState.phase === 'shutdown',
+    licenseDaysLeft:  licState.daysUntil,
+    licenseTier:      licState.tier || ''
   };
 
   const lastCheck  = props.getProperty(UPDATER.PROP_LAST_CHECK);
@@ -231,15 +256,6 @@ function getMapNotifications() {
       result.latestVersion   = cached;
       result.updateAvailable = _versionCompare_(result.installedVersion, cached) < 0;
     }
-  }
-
-  const expiryStr = props.getProperty('WW_LICENSE_EXPIRY');
-  if (expiryStr) {
-    const expiry   = new Date(expiryStr);
-    const daysLeft = Math.ceil((expiry - Date.now()) / (1000 * 60 * 60 * 24));
-    result.licenseDaysLeft = daysLeft;
-    if (daysLeft <= 0)       result.licenseExpired  = true;
-    else if (daysLeft <= 30) result.licenseExpiring = true;
   }
 
   return result;

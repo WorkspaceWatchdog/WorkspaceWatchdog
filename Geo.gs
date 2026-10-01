@@ -228,6 +228,7 @@ function _batchWriteGeoRows_(shGeo, geoMap) {
 }
 
 function fillBlankGeoInMain() {
+  _requireLicensed_();
   _applyRuntimeConfig_();
   const ss     = SpreadsheetApp.getActive();
   const shMain = ss.getSheetByName(CONFIG.MAIN);
@@ -285,6 +286,33 @@ function fillBlankGeoInMain() {
     'Workspace Watchdog', 5);
 }
 
+// Time-driven trigger handler: automatically backfills Main-sheet rows that
+// still carry blank/failed geo, reusing the exact same code path as the manual
+// "Fill Blank Geo in Main" menu item. License enforcement is checked before
+// doing any maintenance work so an unlicensed/shutdown install stays idle.
+// Registered hourly by install/fastInstall and by _enableAutoGeoRetry_().
+function autoRetryFailedGeo() {
+  if (_isLicenseProductBlocked_(_getLicenseState_())) return;
+  try {
+    fillBlankGeoInMain();
+  } catch (e) {
+    _logDiagnostics('autoRetryFailedGeo', new Date(), new Date(), 0, 0,
+      'Auto geo retry failed: ' + (e && e.message ? e.message : e));
+  }
+}
+
+// One-shot installer so an already-running deployment can enable the hourly
+// auto-retry trigger without a full reinstall. Idempotent: removes any existing
+// copy first so repeated calls never stack duplicate triggers.
+function _enableAutoGeoRetry_() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'autoRetryFailedGeo') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('autoRetryFailedGeo').timeBased().everyHours(1).create();
+  SpreadsheetApp.getActive().toast(
+    'Auto geo retry enabled — runs hourly.', 'Workspace Watchdog', 5);
+}
+
 function _backfillGeoForEmail_(email, shGeo, geoMap, lookbackDays) {
   const ev = _fetchLatestLoginEventForUser_(email, lookbackDays || 180);
   if (!ev || !ev.ip) return null;
@@ -325,6 +353,7 @@ function _fetchLatestLoginEventForUser_(email, lookbackDays) {
 // ===== IP Reputation (AbuseIPDB) ==============================================
 
 function checkIPReputation(ip) {
+  _requireLicensed_();
   if (!CONFIG.IP_REP_ENABLED) return null;
   if (!ip) return null;
   const key = PropertiesService.getScriptProperties().getProperty('ABUSEIPDB_KEY');
@@ -380,6 +409,7 @@ function getIPReputation(ip) {
 }
 
 function clearIPReputationCache() {
+  _requireLicensed_();
   const p    = PropertiesService.getScriptProperties();
   const all  = p.getKeys();
   let cleared = 0;
@@ -388,4 +418,57 @@ function clearIPReputationCache() {
     'Cleared ' + cleared + ' cached IP reputation entr' + (cleared === 1 ? 'y' : 'ies') + '.',
     'Workspace Watchdog', 5
   );
+}
+
+// ===== Mobile ISP picker (Settings UI) ========================================
+
+// Common US mobile carrier ISP/org names, merged into the picker's visible list
+// so they're easy to find and select even before they've appeared in GeoCache
+// (e.g. brand-new install). This list only affects which ISP names are SHOWN —
+// it does NOT pre-check any box. Every install starts with nothing selected;
+// the admin opts in per-ISP based on what they see causing false positives in
+// their own Suspicious sheet.
+const DEFAULT_MOBILE_ISPS = [
+  'AT&T Enterprises, LLC',
+  'Verizon Business',
+  'T-Mobile USA, Inc.',
+  'Cellco Partnership',
+  'Sprint PCS',
+  'Sprint Spectrum',
+  'Cricket Wireless',
+  'Boost Mobile',
+  'US Cellular',
+  'MetroPCS'
+];
+
+function getKnownIsps() {
+  _applyRuntimeConfig_();
+  const ss   = SpreadsheetApp.getActive();
+  const sh   = ss.getSheetByName(CONFIG.GEOCACHE);
+  const saved = String(CONFIG.MOBILE_ISP_LIST || '');
+  const savedNames = _splitMobileIspList_(saved);
+
+  const counts = {};
+  if (sh && sh.getLastRow() > 1) {
+    const lastRow = sh.getLastRow();
+    const isps = sh.getRange(2, 5, lastRow - 1, 1).getValues(); // col E = isp
+    isps.forEach(r => {
+      const v = String(r[0] || '').trim();
+      if (!v) return;
+      counts[v] = (counts[v] || 0) + 1;
+    });
+  }
+
+  // Merge in the seed carriers and anything already saved, even if GeoCache is
+  // currently empty (brand-new install) or has since been cleared. This keeps
+  // the list populated on day one and never "loses" a prior admin selection
+  // just because the underlying cache was rebuilt. Checked state is handled
+  // entirely client-side from the saved CSV — see renderMobileIspPicker() in
+  // Settings.html — so nothing here causes a box to be pre-checked.
+  DEFAULT_MOBILE_ISPS.concat(savedNames).forEach(name => {
+    if (!(name in counts)) counts[name] = 0;
+  });
+
+  const sorted = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  return { isps: sorted, counts: counts, current: saved };
 }

@@ -58,6 +58,7 @@ function _sendAlertOnce_(cacheKey, text) {
 }
 
 function _alertsEnabled_(triggerName) {
+  if (_isLicenseProductBlocked_(_getLicenseState_())) return false;
   if (!PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL')) return false;
   if (CONFIG.CHAT_ALERT_SCHEDULED_ONLY && triggerName !== 'scheduledSync') return false;
   return true;
@@ -197,6 +198,33 @@ function _maybeAlertOutsideUS_(triggerName, r, g) {
   _sendAlertOnce_(r.key + '_outsideus', msg);
 }
 
+function _maybeAlertOutsideSafeStates_(triggerName, r, g) {
+  if (!CONFIG.STATE_MONITORING_ENABLED) return;
+  if (!_isStateMonitoringEventEligible_(r && r.ts)) return;
+  if (!CONFIG.CHAT_ALERT_ON_OUTSIDE_SAFE_STATES) return;
+  if (!_alertsEnabled_(triggerName)) return;
+  if (_isWhitelisted_(r.email, r.ip)) return;
+  const ev = String(r.eventName || '');
+  if (ev !== 'login_success') return;
+  const country = (g && g.country) ? String(g.country).trim().toUpperCase() : '';
+  if (country !== 'US') return;
+  const stateCode = _normalizeUsStateCode_(g && g.region);
+  if (!stateCode || _safeStateSet_().has(stateCode)) return;
+  if (CONFIG.IGNORE_MOBILE_STATE_MONITORING && _isMobileIsp_(g && g.isp)) return;
+  const isp = _cleanIsp_((g && g.isp) || '');
+  const loc = [g && g.city, g && g.region, g && g.country].filter(Boolean).join(', ');
+  const safe = Array.from(_safeStateSet_()).sort().join(', ') || '(none)';
+  const msg =
+    'Login Outside Safe States\n' +
+    'User:        ' + r.email + '\n' +
+    'Location:    ' + (loc || stateCode + ', US') + '\n' +
+    'State:       ' + stateCode + '\n' +
+    'Safe States: ' + safe + '\n' +
+    'IP:          ' + r.ip + (isp ? ' (' + isp + ')' : '') + '\n' +
+    'Time:        ' + _fmtCT(r.ts);
+  _sendAlertOnce_(r.key + '_outsidesafestates', msg);
+}
+
 function _maybeAlertImpossibleTravel_(triggerName, email, a, b, miles, mph) {
   if (!CONFIG.CHAT_ALERT_ON_IMPOSSIBLE_TRAVEL) return;
   if (!_alertsEnabled_(triggerName)) return;
@@ -205,10 +233,13 @@ function _maybeAlertImpossibleTravel_(triggerName, email, a, b, miles, mph) {
   if (_isAlertedPermanently_(permKey)) return;
   const fromLoc = [a.city, a.region, a.country].filter(Boolean).join(', ') || 'Unknown';
   const toLoc   = [b.city, b.region, b.country].filter(Boolean).join(', ') || 'Unknown';
+  const fromIp  = a.ip ? a.ip + (_cleanIsp_(a.isp||'') ? ' (' + _cleanIsp_(a.isp) + ')' : '') : '';
+  const toIp    = b.ip ? b.ip + (_cleanIsp_(b.isp||'') ? ' (' + _cleanIsp_(b.isp) + ')' : '') : '';
   const msg =
     'Impossible Travel Detected\n' +
     'User:     ' + email + '\n' +
-    'From:     ' + fromLoc + '  -> To: ' + toLoc + '\n' +
+    'From:     ' + fromLoc + (fromIp ? '  [' + fromIp + ']' : '') + '\n' +
+    'To:       ' + toLoc   + (toIp   ? '  [' + toIp   + ']' : '') + '\n' +
     'Distance: ' + Math.round(miles) + ' mi  |  Speed: ~' + Math.round(mph) + ' mph\n' +
     'Time A:   ' + _fmtCT(a.ts) + '\n' +
     'Time B:   ' + _fmtCT(b.ts);
@@ -216,30 +247,32 @@ function _maybeAlertImpossibleTravel_(triggerName, email, a, b, miles, mph) {
   sendChatAlert_(msg);
 }
 
-function _maybeAlertLoginBurst_(triggerName, email, count, windowMin, firstTs, lastTs, firstKey, lastKey) {
+function _maybeAlertLoginBurst_(triggerName, email, count, windowMin, firstTs, lastTs, firstKey, lastKey, lastIp, lastIsp) {
   if (!CONFIG.CHAT_ALERT_ON_BURST) return;
   if (!_alertsEnabled_(triggerName)) return;
   if (_isWhitelisted_(email, null)) return;
   const permKey = String(firstKey || '') + '_' + String(lastKey || '');
   if (_isAlertedPermanently_(permKey)) return;
+  const ipLine = lastIp ? '\nIP:     ' + lastIp + (_cleanIsp_(lastIsp||'') ? ' (' + _cleanIsp_(lastIsp) + ')' : '') : '';
   const msg =
     'Login Burst Detected\n' +
     'User:   ' + email + '\n' +
     'Events: ' + count + ' logins in <= ' + windowMin + ' minute(s)\n' +
     'From:   ' + _fmtCT(firstTs) + '\n' +
-    'To:     ' + _fmtCT(lastTs);
+    'To:     ' + _fmtCT(lastTs) + ipLine;
   _markAlertedPermanently_(permKey);
   sendChatAlert_(msg);
 }
 
 // ===== Chat Settings & Test ===================================================
 
-function saveChatSettings(webhookUrl, dedupeHours, onOutsideUS, onTravel, onBurst, scheduledOnly) {
+function saveChatSettings(webhookUrl, dedupeHours, onOutsideUS, onOutsideSafeStates, onTravel, onBurst, scheduledOnly) {
   const p = PropertiesService.getScriptProperties();
   if (webhookUrl && webhookUrl.trim()) p.setProperty('CHAT_WEBHOOK_URL', webhookUrl.trim());
   p.setProperties({
     CHAT_ALERT_DEDUPE_HOURS:         String(Number(dedupeHours) || 12),
     CHAT_ALERT_ON_OUTSIDE_US:        String(!!onOutsideUS),
+    CHAT_ALERT_ON_OUTSIDE_SAFE_STATES: String(onOutsideSafeStates !== false),
     CHAT_ALERT_ON_IMPOSSIBLE_TRAVEL: String(!!onTravel),
     CHAT_ALERT_ON_BURST:             String(!!onBurst),
     CHAT_ALERT_SCHEDULED_ONLY:       String(!!scheduledOnly)
@@ -299,12 +332,17 @@ function _isWhitelisted_(email, ip) {
 }
 
 function saveWhitelist(raw) {
-  const entries = String(raw || '').replace(/,/g, '\n').split('\n').map(e => e.trim()).filter(Boolean);
+  const lines = String(raw || '').replace(/,/g, '\n').split('\n')
+    .map(e => e.trim().toLowerCase()).filter(Boolean);
+
+  const entries  = lines.filter(e => _isValidWhitelistEntry_(e));
+  const rejected = lines.filter(e => !_isValidWhitelistEntry_(e));
+
   PropertiesService.getScriptProperties().setProperty('SUSPICIOUS_WHITELIST', entries.join('\n'));
   __WHITELIST = null;
   const emails = entries.filter(e => e.includes('@')).length;
   const ips    = entries.length - emails;
-  return { ok: true, emailCount: emails, ipCount: ips };
+  return { ok: true, emailCount: emails, ipCount: ips, rejected: rejected };
 }
 
 function getWhitelist() {
@@ -312,6 +350,7 @@ function getWhitelist() {
 }
 
 function removeFromWhitelist(entry) {
+  _requireAllowedUser_();
   if (!entry) return { ok: false };
   const p   = PropertiesService.getScriptProperties();
   const raw = p.getProperty('SUSPICIOUS_WHITELIST') || '';
@@ -321,9 +360,23 @@ function removeFromWhitelist(entry) {
   return { ok: true, remaining: cleaned.length };
 }
 
+// Accepts only a plain email address or a plain IPv4/IPv6 address — anything
+// else is rejected before it ever reaches storage or the Live Map's
+// whitelist manager UI.
+function _isValidWhitelistEntry_(entry) {
+  const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+  const IPV4_RE  = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+  const IPV6_RE  = /^[0-9A-Fa-f:]+:[0-9A-Fa-f:]+$/;
+  return EMAIL_RE.test(entry) || IPV4_RE.test(entry) || IPV6_RE.test(entry);
+}
+
 function addToWhitelistFromMap(entry) {
+  _requireAllowedUser_();
   if (!entry || !String(entry).trim()) return { ok: false, message: 'Empty entry.' };
   entry = String(entry).trim().toLowerCase();
+  if (!_isValidWhitelistEntry_(entry)) {
+    return { ok: false, message: entry + ' is not a valid email address or IP address.' };
+  }
   const p   = PropertiesService.getScriptProperties();
   const raw = p.getProperty('SUSPICIOUS_WHITELIST') || '';
   const existing = raw.replace(/,/g, '\n').split('\n')

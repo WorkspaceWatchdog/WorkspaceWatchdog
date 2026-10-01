@@ -1,11 +1,11 @@
 {
-  "version": "3.4.17",
-  "released": "2026-04-02",
+  "version": "3.7.1",
+  "released": "2026-10-01",
   "changelog": [
-    "v3.4.17 — Fixed Geolocation API issue that caused blank Geolocation data",
-    "v3.4.16 — Fixed Campus IP Filter not applying during backfill (config was not being loaded before the backfill loop ran).",
-    "v3.4.15 — Extended Campus IP Filter to backfill — campus IPs are now also excluded when running a backfill.",
-    "v3.4.14 — Fixed Campus IP Filter setting not persisting in Settings UI after save.",
-    "v3.4.13 — Added Campus IP Filter: logins from specified public IPs are silently dropped at ingestion and never written to Main. Configure via Settings > Campus IP Filter (comma-separated IPs)."
+    "Hardened license enforcement across scheduled sync, manual sync, backfill, reports, Live Map data endpoints, raw data API access, and maintenance functions",
+    "Expired trial licenses now shut down immediately instead of continuing through a trial grace period",
+    "Unlicensed installations are now blocked from running Workspace Watchdog monitoring functions",
+    "Paid licenses retain the existing 30-day grace period after expiration",
+    "Improved expired-license revalidation caching so expired installations do not repeatedly contact the license server on every open or sync"
   ]
 }

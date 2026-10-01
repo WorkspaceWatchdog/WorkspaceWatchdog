@@ -131,10 +131,28 @@
     .view-opt .view-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
     .view-opt.active .view-dot { background: var(--accent); box-shadow: var(--glow-blue); }
     .tb-sep { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+    /* #tbLeft / #tbRight are kept at equal width by syncToolbarHalves() (JS),
+       which measures each side's real content width and applies the larger
+       one as a shared flex-basis to both. That's what keeps #tbScoreGroup
+       genuinely centered on the toolbar — fixed equal-halves alone clipped
+       the wider side's content (e.g. the texture dropdown cut to "Nigh"),
+       and flex-grow spacers alone centered between the two sides instead of
+       on the container, drifting off-center whenever one side had more
+       controls than the other (e.g. globe mode's extra rotate/texture
+       controls on the left). overflow:hidden remains only as a last-resort
+       safety net for windows too narrow to fit both sides at their natural
+       width even when synced.
+       Previously #tbScoreGroup was absolutely centered on #toolbar itself,
+       which collided with the left controls once globe mode added the
+       rotate/texture dropdowns (worse on narrower/lower-resolution screens). */
+    #tbLeft, #tbRight {
+      display: flex; align-items: center; gap: 6px;
+      flex: 1 1 auto; min-width: 0; overflow: hidden;
+    }
+    #tbRight { justify-content: flex-end; }
     #tbScoreGroup {
-      position: absolute; left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; height: 100%;
-      pointer-events: auto; z-index: 10;
+      flex-shrink: 0;
       background: linear-gradient(90deg, transparent 0%, #060a14f2 8%, #060a14f2 92%, transparent 100%);
     }
     .tb-sc { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px; border-left: 1px solid var(--border); min-width: 52px; height: 100%; }
@@ -175,7 +193,42 @@
     .sc-red { color: var(--red); text-shadow: var(--glow-red); } .sc-blue { color: var(--blue); }
     #main { display: flex; flex: 1; overflow: hidden; position: relative; clip-path: inset(0); min-height: 0; }
     #map { flex: 1; }
+    /* Key-free raster basemap. OpenStreetMap tiles are darkened in-browser so
+       the map keeps the Workspace Watchdog dark visual style without requiring
+       a CARTO/API key. */
+    #map .leaflet-tile-pane {
+      filter: invert(100%) hue-rotate(180deg) brightness(72%) contrast(92%) saturate(70%);
+    }
     #globe-container { position: absolute; inset: 0; display: none; z-index: 5; }
+
+    /* ── License expiry banner ────────────────────────────────────────────
+       Sibling of #map / #globe-container inside #main (position:relative),
+       same pattern as #globeAlertPanel below — keeps it above both modes. */
+    #licenseBanner {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      z-index: 1500;
+      padding: 8px 16px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      align-items: center; justify-content: center; gap: 12px;
+      text-align: center;
+      border-bottom: 1px solid;
+    }
+    #licenseBanner.visible { display: flex; }
+    #licenseBanner.warn {
+      background: rgba(255,170,0,0.15); color: var(--yellow); border-color: var(--yellow);
+    }
+    #licenseBanner.expired {
+      background: rgba(255,59,92,0.18); color: var(--red); border-color: var(--red);
+      box-shadow: var(--glow-red);
+    }
+    #licenseBanner .lb-close {
+      background: none; border: 1px solid currentColor; color: inherit;
+      border-radius: 4px; font-size: 11px; padding: 2px 8px; cursor: pointer;
+      font-family: 'Share Tech Mono', monospace;
+    }
 
     /* ── Globe Suspicious Overlay Panel ─────────────────────────────────── */
     #globeAlertPanel {
@@ -239,6 +292,7 @@
     .gap-alert-travel  { border-left-color: #ff6d00 !important; background: rgba(255,109,0,0.06); }
     .gap-alert-burst   { border-left-color: #ffaa00 !important; background: rgba(255,170,0,0.06); }
     .gap-alert-outside { border-left-color: #f44336 !important; background: rgba(244,67,54,0.06); }
+    .gap-alert-state   { border-left-color: #7e57c2 !important; background: rgba(126,87,194,0.07); }
     .gap-alert-email {
       font-family: 'Rajdhani', sans-serif;
       font-size: 13px; font-weight: 700;
@@ -348,6 +402,7 @@
     .susp-travel { background: #ff6d00; --pulse-clr: rgba(255,109,0,0.6); }
     .susp-burst  { background: #ffaa00; --pulse-clr: rgba(255,170,0,0.6); }
     .susp-out    { background: #f44336; --pulse-clr: rgba(244,67,54,0.6); }
+    .susp-state  { background: #7e57c2; --pulse-clr: rgba(126,87,194,0.6); }
     #riskPanel .risk-label { font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; font-weight: 700; }
     .trend-wrap { margin-top: 10px; }
     .trend-label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; font-weight: 700; }
@@ -515,6 +570,7 @@
 
 <div id="toolbar">
 
+<div id="tbLeft">
   <!-- View mode dropdown -->
   <div id="viewDropWrap">
     <button id="viewDropBtn" onclick="toggleViewDrop()">
@@ -566,8 +622,9 @@
       <option value="black">⬛ Pure Black</option>
     </select>
   </div>
+</div>
 
-  <!-- Centered scorecards — absolutely positioned so they stay centered regardless of controls on either side -->
+  <!-- Centered scorecards — kept centered by syncToolbarHalves() (JS), which equalizes #tbLeft/#tbRight widths so this sits exactly in the middle -->
   <div id="tbScoreGroup">
     <div class="tb-sc">
       <span class="tb-sc-label">Events</span>
@@ -599,9 +656,7 @@
     </div>
   </div>
 
-  <!-- Spacer pushes right-side controls to the right -->
-  <div style="flex:1;"></div>
-
+  <div id="tbRight">
   <!-- Auto refresh controls -->
   <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;font-family:'Share Tech Mono',monospace;color:var(--text2);letter-spacing:.06em;">
     <input type="checkbox" id="chkAuto" onchange="toggleAuto()" checked> AUTO
@@ -622,6 +677,7 @@
 
   <!-- Gear — opens filter drawer -->
   <button id="btnGear" onclick="toggleFilterDrawer()" title="Filters &amp; Tools">&#9881;</button>
+  </div>
 
 </div>
 
@@ -653,6 +709,7 @@
 <!-- scorecards row removed -->
 
 <div id="main">
+  <div id="licenseBanner"></div>
   <div id="map"></div>
   <div id="globe-container"></div>
 
@@ -691,6 +748,13 @@
         <div>
           <div style="font-size:11px;font-weight:700;color:#f44336;">Outside US</div>
           <div style="font-size:10px;color:var(--text2);">Login from foreign location</div>
+        </div>
+      </div>
+      <div class="gl-row">
+        <div style="width:3px;height:32px;background:#7e57c2;border-radius:2px;box-shadow:0 0 6px #7e57c2;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#7e57c2;">Outside Safe States</div>
+          <div style="font-size:10px;color:var(--text2);">U.S. login from an unexpected state</div>
         </div>
       </div>
       <div class="gl-row" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border);">
@@ -771,16 +835,40 @@ var map, clusterGroup, arcLayer;
 var activeNowCount = 0;
 var allRows = [], suspRows = [], suspArcs = [];
 var mode = 'main', evtType = 'all', autoTimer = null;
+var _reloadInFlight = false;
 
 // Init map FIRST before any google.script.run calls
 map = L.map('map', { zoomControl: true }).setView([37, -96], 4);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: 'CARTO | OpenStreetMap', subdomains: 'abcd', maxZoom: 19
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 19
 }).addTo(map);
 arcLayer = L.layerGroup().addTo(map);
 
+// Check license phase immediately — don't wait on getLiveMapData()'s
+// licenseLocked flag, which only fires once the map is already disabled.
+checkLicenseBanner();
+
+// Keeps #tbScoreGroup genuinely centered on the toolbar by measuring each
+// side's real content width and applying the larger one as a shared
+// flex-basis to both — equal-width sides is what makes the middle element
+// sit on the true center, regardless of which side currently has more
+// controls (e.g. globe mode's rotate/texture dropdowns on the left).
+function syncToolbarHalves() {
+  var left = document.getElementById('tbLeft');
+  var right = document.getElementById('tbRight');
+  if (!left || !right) return;
+  left.style.flexBasis = 'auto';
+  right.style.flexBasis = 'auto';
+  var w = Math.max(left.scrollWidth, right.scrollWidth);
+  left.style.flexBasis = w + 'px';
+  right.style.flexBasis = w + 'px';
+}
+window.addEventListener('resize', syncToolbarHalves);
+
 // THEN load data and OUs after map is ready
 window.onload = function() {
+  syncToolbarHalves();
   setTimeout(function() {
     map.invalidateSize();
     loadOUs();
@@ -812,6 +900,67 @@ function dismissSplash() {
   setTimeout(function() {
     splash.style.display = 'none';
   }, 650);
+}
+
+// ── License expiry banner ─────────────────────────────────────────────────
+
+function checkLicenseBanner() {
+  google.script.run
+    .withSuccessHandler(renderLicenseBanner)
+    .withFailureHandler(function() {})
+    .getLicenseStateForClient();
+}
+
+function renderLicenseBanner(state) {
+  if (!state) return;
+  var el = document.getElementById('licenseBanner');
+  if (!el) return;
+
+  var dismissible = true;
+  var cls = 'warn';
+  var msg = '';
+
+  switch (state.phase) {
+    case 'warn15':
+    case 'warn7':
+      msg = '⚠ Your Workspace Watchdog license expires in ' + state.daysUntil +
+        ' day' + (state.daysUntil === 1 ? '' : 's') + ' (' + state.expiresOn + ').';
+      break;
+    case 'warn1':
+      msg = '⚠ Your Workspace Watchdog license expires ' +
+        (state.daysUntil === 0 ? 'today' : 'tomorrow') + ' (' + state.expiresOn + ').';
+      break;
+    case 'mapLocked':
+      dismissible = false;
+      cls = 'expired';
+      msg = '⚠ Your license expired on ' + state.expiresOn +
+        '. Renew now — the Live Map will be disabled once the grace period ends.';
+      break;
+    case 'shutdown':
+      dismissible = false;
+      cls = 'expired';
+      msg = '⚠ License expired — grace period has ended. Renew at workspacewatchdog.com to restore service.';
+      break;
+    default:
+      el.classList.remove('visible');
+      return;
+  }
+
+  // Dismissible banners stay dismissed for this phase/day until the phase advances
+  var dismissKey = 'ww_license_banner_dismissed_' + state.phase + '_' + state.expiresOn;
+  if (dismissible && sessionStorage.getItem(dismissKey)) {
+    el.classList.remove('visible');
+    return;
+  }
+
+  el.className = 'visible ' + cls;
+  el.innerHTML = '<span>' + msg + '</span>' +
+    (dismissible ? '<button class="lb-close" onclick="dismissLicenseBanner(\'' + dismissKey + '\')">Dismiss</button>' : '');
+}
+
+function dismissLicenseBanner(key) {
+  sessionStorage.setItem(key, '1');
+  document.getElementById('licenseBanner').classList.remove('visible');
 }
 
 // ── Update Notifications ─────────────────────────────────────────────────────
@@ -1255,17 +1404,17 @@ function setEvt(t) {
 }
 
 function reload() {
+  if (_reloadInFlight) return; // prevent overlapping calls
+  _reloadInFlight = true;
   setLoading(true);
   clearMarkers();
   _riskScoreCache = {}; // clear cache on reload so scores stay fresh
   window._riskScores = {}; // clear backend risk scores
-  window._lastMapRefresh = Date.now(); // mark attempt time immediately
-  updateMapRefreshedAge();
   loadActiveNowCount();
   if (mode === 'main') {
     google.script.run
-      .withSuccessHandler(function(d) { onMain(d); setLoading(false); })
-      .withFailureHandler(function(e) { setLoading(false); showErr(e); })
+      .withSuccessHandler(function(d) { _reloadInFlight = false; onMain(d); setLoading(false); })
+      .withFailureHandler(function(e) { _reloadInFlight = false; setLoading(false); showErr(e); })
       .getLiveMapData({
         maxRows: 2000, eventType: evtType,
         outsideUS: document.getElementById('chkOutsideUS').checked,
@@ -1274,13 +1423,13 @@ function reload() {
       });
   } else if (mode === 'active') {
     google.script.run
-      .withSuccessHandler(function(d) { onActive(d); setLoading(false); })
-      .withFailureHandler(function(e) { setLoading(false); showErr(e); })
+      .withSuccessHandler(function(d) { _reloadInFlight = false; onActive(d); setLoading(false); })
+      .withFailureHandler(function(e) { _reloadInFlight = false; setLoading(false); showErr(e); })
       .getActiveNowMapData();
   } else {
     google.script.run
-      .withSuccessHandler(function(d) { onSusp(d); setLoading(false); })
-      .withFailureHandler(function(e) { setLoading(false); showErr(e); })
+      .withSuccessHandler(function(d) { _reloadInFlight = false; onSusp(d); setLoading(false); })
+      .withFailureHandler(function(e) { _reloadInFlight = false; setLoading(false); showErr(e); })
       .getSuspiciousMapData();
   }
 }
@@ -1364,6 +1513,8 @@ function mkCluster() {
 }
 
 function onMain(d) {
+  window._lastMapRefresh = Date.now(); // stamp when data actually arrives
+  updateMapRefreshedAge();
   allRows = d.rows || [];
   // Store full chart data from server (includes all rows, not just geo-tagged)
   window._chartData  = { days: d.chartDays || null, hours: d.chartHours || null };
@@ -1419,9 +1570,18 @@ function onMain(d) {
   if (chartsOpen) renderCharts(allRows);
   // Feed globe if active
   if (globeInitialized && document.getElementById('globeToggle').checked) feedGlobeData();
+  // If suspicious overlay is active, silently re-fetch it so alert panel stays current
+  if (suspOverlayActive) {
+    google.script.run
+      .withSuccessHandler(function(d) { drawSuspOverlay(d); })
+      .withFailureHandler(function() {}) // silent — don't interrupt the main view
+      .getSuspiciousMapData();
+  }
 }
 
 function onActive(d) {
+  window._lastMapRefresh = Date.now(); // stamp when data actually arrives
+  updateMapRefreshedAge();
   allRows = d.rows || [];
   clusterGroup = mkCluster();
   allRows.forEach(function(r) {
@@ -1442,9 +1602,18 @@ function onActive(d) {
   document.getElementById('sbRight').textContent = 'Last loaded: ' + new Date().toLocaleTimeString();
   // Feed globe if active
   if (globeInitialized && document.getElementById('globeToggle').checked) feedGlobeData();
+  // If suspicious overlay is active, silently re-fetch it so alert panel stays current
+  if (suspOverlayActive) {
+    google.script.run
+      .withSuccessHandler(function(d) { drawSuspOverlay(d); })
+      .withFailureHandler(function() {}) // silent — don't interrupt the main view
+      .getSuspiciousMapData();
+  }
 }
 
 function onSusp(d) {
+  window._lastMapRefresh = Date.now(); // stamp when data actually arrives
+  updateMapRefreshedAge();
   suspRows = d.rows || []; suspArcs = d.arcs || []; allRows = suspRows;
   clusterGroup = mkCluster();
   suspRows.forEach(function(r) {
@@ -1452,9 +1621,10 @@ function onSusp(d) {
     if (!ll || !ll.includes(',')) return;
     var p = ll.split(','); var lat = +p[0], lon = +p[1];
     if (!isFinite(lat) || !isFinite(lon)) return;
-    var col = r.reason === 'Impossible Travel' ? '#ff6d00'  // orange
-            : r.reason === 'Login Burst'       ? '#ffaa00'  // yellow
-            :                                    '#f44336'; // outside US = red
+    var col = r.reason === 'Impossible Travel' ? '#ff6d00'
+            : r.reason === 'Login Burst'       ? '#ffaa00'
+            : r.reason === 'Outside Safe States' ? '#7e57c2'
+            :                                    '#f44336';
     var m = L.marker([lat, lon], { icon: mkIcon(col, 12) });
     m.opt_fail = r.reason === 'Login Burst'; m.opt_out = r.reason === 'Outside US'; m.opt_susp = true;
     m.on('click', function() { showSuspDetail(r); });
@@ -1591,7 +1761,7 @@ function fld(label, val, copyable) {
   return h + '</div>';
 }
 function cp(t) { navigator.clipboard.writeText(t); }
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function setLoading(on) { document.getElementById('loadingMsg').textContent = on ? 'Loading...' : ''; }
 function showErr(e) {
   var msg = 'Error: ' + (e.message || String(e));
@@ -1650,8 +1820,11 @@ function drawSuspOverlay(d) {
     var p = ll.split(','), lat = +p[0], lon = +p[1];
     if (!isFinite(lat) || !isFinite(lon)) return;
     var cls = r.reason === 'Impossible Travel' ? 'susp-travel'
-             : r.reason === 'Login Burst'       ? 'susp-burst' : 'susp-out';
-    var lbl = r.reason === 'Impossible Travel' ? 'Travel' : r.reason === 'Login Burst' ? 'Burst' : 'Outside US';
+             : r.reason === 'Login Burst'       ? 'susp-burst'
+             : r.reason === 'Outside Safe States' ? 'susp-state' : 'susp-out';
+    var lbl = r.reason === 'Impossible Travel' ? 'Travel'
+            : r.reason === 'Login Burst' ? 'Burst'
+            : r.reason === 'Outside Safe States' ? 'Outside Safe States' : 'Outside US';
     var marker = L.marker([lat, lon], {
       icon: L.divIcon({
         className: '',
@@ -1660,7 +1833,7 @@ function drawSuspOverlay(d) {
         iconAnchor: [8, 8]
       })
     }).bindTooltip(
-      '<b style="color:' + (cls==='susp-travel'?'#f44336':cls==='susp-burst'?'#ce93d8':'#ffaa00') + ';">' +
+      '<b style="color:' + (cls==='susp-travel'?'#f44336':cls==='susp-burst'?'#ce93d8':cls==='susp-state'?'#7e57c2':'#ffaa00') + ';">' +
       esc(r.reason) + '</b><br>' + esc(r.email) +
       '<br><span style="font-size:11px;color:#9aa0a6;">' + esc(String(r.ts||'').slice(0,16)) + '</span>',
       { sticky: true }
@@ -2452,7 +2625,12 @@ function wlAddEntry() {
   status.style.color = 'var(--text2)';
   status.textContent = 'Adding...';
   google.script.run
-    .withSuccessHandler(function() {
+    .withSuccessHandler(function(res) {
+      if (!res || !res.ok) {
+        status.style.color = 'var(--red)';
+        status.textContent = 'Rejected — not a valid email or IP';
+        return;
+      }
       status.style.color = 'var(--green)';
       status.textContent = 'Added: ' + entry;
       input.value = '';
@@ -2481,7 +2659,7 @@ function openFullScreen() {
   google.script.run
     .withSuccessHandler(function(url) {
       if (!url) {
-        showErr('Full-screen URL not configured. Set DEPLOYMENT_ID and API_TOKEN in Script Properties, then use Workspace Watchdog > Full-Screen Map from the sheet menu.');
+        showErr('Full-screen URL not configured. Set DEPLOYMENT_ID in Script Properties, then use Workspace Watchdog > Full-Screen Map from the sheet menu.');
         return;
       }
       window.open(url, '_blank');
@@ -2511,8 +2689,7 @@ function updateGlobeAlertPanel() {
   panel.classList.add('visible');
 
   var rows = (suspOverlayData.rows || []).slice(); // copy
-  // Sort: Impossible Travel first, then Burst, then Outside US, then by time desc
-  var order = { 'Impossible Travel': 0, 'Login Burst': 1, 'Outside US': 2 };
+  // Sort newest first; all suspicious reasons are supported
   // Sort newest first (reverse chronological)
   rows.sort(function(a, b) {
     return String(b.ts || '').localeCompare(String(a.ts || ''));
@@ -2528,10 +2705,11 @@ function updateGlobeAlertPanel() {
 
   list.innerHTML = rows.slice(0, 15).map(function(r) {
     var icon = r.reason === 'Impossible Travel' ? '&#9992;' :
-               r.reason === 'Login Burst'       ? '&#9889;' : '&#127758;';
-    var iconColor = r.reason === 'Impossible Travel' ? '#ff6d00' :  // orange
-                    r.reason === 'Login Burst'       ? '#ffaa00' :  // yellow
-                                                       '#f44336';  // red for outside US
+               r.reason === 'Login Burst'       ? '&#9889;' :
+               r.reason === 'Outside Safe States' ? '&#128205;' : '&#127758;';
+    var iconColor = r.reason === 'Impossible Travel' ? '#ff6d00' :
+                    r.reason === 'Login Burst'       ? '#ffaa00' :
+                    r.reason === 'Outside Safe States' ? '#7e57c2' : '#f44336';
     var reasonText = r.reason || 'Suspicious';
 
     // Build detail line
@@ -2554,6 +2732,9 @@ function updateGlobeAlertPanel() {
     } else if (r.reason === 'Outside US') {
       var loc = [r.fromCity, r.fromReg, r.fromCo].filter(Boolean).join(', ');
       detail = loc ? 'Login from: ' + esc(loc) : 'Login from outside US';
+    } else if (r.reason === 'Outside Safe States') {
+      var stateLoc = [r.fromCity, r.fromReg, r.fromCo].filter(Boolean).join(', ');
+      detail = stateLoc ? 'Unexpected state: ' + esc(stateLoc) : (r.details ? esc(r.details) : 'Login outside Safe States');
     }
 
     // Time ago
@@ -2567,10 +2748,12 @@ function updateGlobeAlertPanel() {
     }
 
     var reasonLabel = r.reason === 'Impossible Travel' ? 'Impossible Travel' :
-                      r.reason === 'Login Burst'       ? 'Login Burst' : 'Outside US';
+                      r.reason === 'Login Burst'       ? 'Login Burst' :
+                      r.reason === 'Outside Safe States' ? 'Outside Safe States' : 'Outside US';
 
     var itemClass = r.reason === 'Impossible Travel' ? 'gap-alert-travel' :
-                    r.reason === 'Login Burst'       ? 'gap-alert-burst'  : 'gap-alert-outside';
+                    r.reason === 'Login Burst'       ? 'gap-alert-burst'  :
+                    r.reason === 'Outside Safe States' ? 'gap-alert-state' : 'gap-alert-outside';
 
     return '<div class="gap-alert-item ' + itemClass + '" onclick="globeAlertClick(' + JSON.stringify(r) + ')">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
@@ -2610,6 +2793,7 @@ var GLOBE_COLORS = {
   travel:  '#ff6d00',  // Impossible Travel — orange (critical)
   burst:   '#ffaa00',  // Login Burst — yellow (warning)
   outside: '#f44336',  // Outside US — red (foreign login)
+  state:   '#7e57c2',  // Outside Safe States — purple
   failure: '#e53935',  // Login failure — dark red
   success: '#00c800',  // Normal success — green
   other:   '#00a000'   // Other events — darker green
@@ -2628,6 +2812,7 @@ function toggleGlobeView() {
   // Toolbar controls
   document.getElementById('rotateWrap').style.display  = on ? 'flex' : 'none';
   document.getElementById('textureWrap').style.display = on ? 'flex' : 'none';
+  syncToolbarHalves(); // left side just gained/lost the rotate/texture controls
 
   if (on) {
     // ── Entering globe view ──────────────────────────────────────────────
@@ -2820,6 +3005,7 @@ function buildGlobePoints() {
       if (r.evName === 'login_failure') { risk = 'med'; col = GLOBE_COLORS.failure; }
       if (r.outside)                      { risk = 'high'; col = GLOBE_COLORS.outside; }
       if (r.reason === 'Login Burst')     { risk = 'high'; col = GLOBE_COLORS.burst; }
+      if (r.reason === 'Outside Safe States') { risk = 'high'; col = GLOBE_COLORS.state; }
       if (r.reason === 'Impossible Travel'){ risk = 'high'; col = GLOBE_COLORS.travel; }
     }
 
@@ -2850,7 +3036,8 @@ function buildGlobePoints() {
       var p = ll.split(','); var lat = +p[0]; var lng = +p[1];
       if (!isFinite(lat) || !isFinite(lng)) return;
       var col = r.reason === 'Impossible Travel' ? GLOBE_COLORS.travel
-              : r.reason === 'Login Burst'       ? GLOBE_COLORS.burst : GLOBE_COLORS.outside;
+              : r.reason === 'Login Burst'       ? GLOBE_COLORS.burst
+              : r.reason === 'Outside Safe States' ? GLOBE_COLORS.state : GLOBE_COLORS.outside;
       points.push({ lat: lat, lng: lng, label: r.email || '', city: r.details || '',
                     type: r.reason || '', risk: 'high', color: col, count: 1, _row: r, _susp: true });
     });
@@ -2864,9 +3051,11 @@ function buildGlobePoints() {
       var p = ll.split(','); var lat = +p[0]; var lng = +p[1];
       if (!isFinite(lat) || !isFinite(lng)) return;
       var col  = r.reason === 'Impossible Travel' ? '#f44336'
-               : r.reason === 'Login Burst'       ? '#ce93d8' : '#ffaa00';
+               : r.reason === 'Login Burst'       ? '#ce93d8'
+               : r.reason === 'Outside Safe States' ? '#7e57c2' : '#ffaa00';
       var risk = r.reason === 'Impossible Travel' ? 'high'
-               : r.reason === 'Login Burst'       ? 'med'  : 'med';
+               : r.reason === 'Login Burst'       ? 'med'
+               : r.reason === 'Outside Safe States' ? 'high' : 'med';
       points.push({ lat: lat, lng: lng, label: r.email || '', city: r.details || '',
                     type: r.reason || '', risk: risk, color: col, count: 1, _row: r, _susp: true });
     });

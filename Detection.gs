@@ -1,7 +1,7 @@
 /* global AdminReports, AdminDirectory */
 /**
  * Detection.gs — Active Now refresh, Suspicious event detection (impossible travel,
- *                login bursts, outside US), and user risk scoring.
+ *                login bursts, outside US, safe-state monitoring), and user risk scoring.
  */
 
 function migrateSuspiciousSheet() {
@@ -14,11 +14,20 @@ function migrateSuspiciousSheet() {
     SpreadsheetApp.getActive().toast('Suspicious sheet already up to date.', 'Watchdog', 3);
     return;
   }
-  shSusp.getRange(1, expectedCols).setValue('Alerted');
+  // New columns are appended at the end — just pad existing rows with blanks
+  // and write the full header row. No remapping needed.
   const lastRow = shSusp.getLastRow();
-  if (lastRow > 1) shSusp.getRange(2, expectedCols, lastRow - 1, 1).setValue('');
+  _setHeaders(shSusp, SUSP_HEADERS);
+  if (lastRow > 1) {
+    const existing = shSusp.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const padded = existing.map(r => {
+      while (r.length < expectedCols) r.push('');
+      return r;
+    });
+    shSusp.getRange(2, 1, padded.length, expectedCols).setValues(padded);
+  }
   SpreadsheetApp.getActive().toast(
-    'Added Alerted column to Suspicious sheet. ' + (lastRow - 1) + ' rows updated.',
+    'Suspicious sheet updated to ' + expectedCols + ' columns. ' + (lastRow - 1) + ' rows updated.',
     'Workspace Watchdog', 5);
 }
 
@@ -167,8 +176,8 @@ function _refreshSuspicious_(triggerName) {
     const numCols = Math.min(shSusp.getLastColumn(), SUSP_HEADERS.length);
     const existing = shSusp.getRange(2, 1, shSusp.getLastRow() - 1, numCols).getValues();
     existing.forEach(r => {
-      if (r.length >= 20 && String(r[19]) === 'Yes') {
-        alertedKeys.add(String(r[14]) + '_' + String(r[15] || ''));
+      if (r.length >= SUSP_HEADERS.length && String(r[SUSP_HEADERS.indexOf('Alerted')]) === 'Yes') {
+        alertedKeys.add(String(r[SUSP_HEADERS.indexOf('EventKey A')]) + '_' + String(r[SUSP_HEADERS.indexOf('EventKey B')] || ''));
       }
     });
   }
@@ -177,14 +186,14 @@ function _refreshSuspicious_(triggerName) {
   const keepCutoff   = new Date(Date.now() - CONFIG.KEEP_DAYS * 24 * 3600000);
   const retainedAlerted = new Set();
   const retained = existingSusp.filter(r => {
-    try { return new Date(r[16] || r[0]) >= keepCutoff; } catch(_) { return true; }
+    try { return new Date(r[SUSP_HEADERS.indexOf('SuspNoTZ')] || r[0]) >= keepCutoff; } catch(_) { return true; }
   }).map(r => {
     while (r.length < SUSP_HEADERS.length) r.push('');
     return r;
   });
   retained.forEach(r => {
     if (String(r[SUSP_HEADERS.length - 1]) === 'Yes') {
-      retainedAlerted.add(String(r[14]) + '_' + String(r[15] || ''));
+      retainedAlerted.add(String(r[SUSP_HEADERS.indexOf('EventKey A')]) + '_' + String(r[SUSP_HEADERS.indexOf('EventKey B')] || ''));
     }
   });
 
@@ -203,7 +212,10 @@ function _refreshSuspicious_(triggerName) {
   function _suspTail_(dateObj, reason) {
     const suspNoTZ = _fmtCT_no_tz_(dateObj);
     const hb = _hourBucketNoTZ_(dateObj);
-    const severity = (reason === 'Impossible Travel') ? 3 : (reason === 'Login Burst') ? 2 : (reason === 'Outside US') ? 1 : 0;
+    const severity = (reason === 'Impossible Travel') ? 3
+                  : (reason === 'Login Burst') ? 2
+                  : (reason === 'Outside US' || reason === 'Outside Safe States') ? 1
+                  : 0;
     return [suspNoTZ, hb, severity];
   }
 
@@ -216,12 +228,47 @@ function _refreshSuspicious_(triggerName) {
       const ouAlerted  = _isAlertedPermanently_(ouAlertKey) ? 'Yes' : '';
       out.push([
         _fmtCT(r.ts), r.email, 'Outside US', 'Country=' + r.country,
-        '', '', '', '', '', '', '', '', '', '', r.key, '',
-        ...tail, ouAlerted
+        r.city||'', r.region||'', r.country||'', '',
+        '', '', '', '',
+        '', '', r.key, '',
+        ...tail,
+        r.ip||'', _cleanIsp_(r.isp||''), '', '',
+        ouAlerted
       ]);
       if (!ouAlerted) _markAlertedPermanently_(ouAlertKey);
     }
   });
+
+  // Outside Safe States — successful U.S. logins only. Unknown/blank state
+  // values are intentionally ignored, and selected carrier ISPs may be suppressed
+  // to reduce cellular/CGNAT location noise.
+  if (CONFIG.STATE_MONITORING_ENABLED) {
+    rows.forEach(r => {
+      if (String(r.name || '') !== 'login_success') return;
+      if (!_isStateMonitoringEventEligible_(r.ts)) return;
+      if (String(r.country || '').trim().toUpperCase() !== 'US') return;
+      const stateCode = _normalizeUsStateCode_(r.region);
+      if (!stateCode || _safeStateSet_().has(stateCode)) return;
+      if (_isWhitelisted_(r.email, r.ip)) return;
+      if (CONFIG.IGNORE_MOBILE_STATE_MONITORING && _isMobileIsp_(r.isp)) return;
+
+      const tail = _suspTail_(r.ts, 'Outside Safe States');
+      const stateAlertKey = String(r.key) + '_state';
+      const stateAlerted = _isAlertedPermanently_(stateAlertKey) ? 'Yes' : '';
+      const safe = Array.from(_safeStateSet_()).sort().join(', ');
+      out.push([
+        _fmtCT(r.ts), r.email, 'Outside Safe States',
+        'State=' + stateCode + (safe ? '; Safe=' + safe : ''),
+        r.city||'', r.region||'', r.country||'', r.latlng||'',
+        '', '', '', '',
+        '', '', r.key, '',
+        ...tail,
+        r.ip||'', _cleanIsp_(r.isp||''), '', '',
+        stateAlerted
+      ]);
+      if (!stateAlerted) _markAlertedPermanently_(stateAlertKey);
+    });
+  }
 
   // Bursts
   Object.keys(byUser).forEach(email => {
@@ -239,10 +286,12 @@ function _refreshSuspicious_(triggerName) {
         out.push([
           _fmtCT(last.ts), email, 'Login Burst', c + ' events <= ' + CONFIG.BURST_WINDOW_MIN + ' min',
           '', '', '', '', '', '', '', '', '', '', evs[i].key, last.key,
-          ...tail, burstAlerted
+          ...tail,
+          last.ip||'', _cleanIsp_(last.isp||''), '', '',
+          burstAlerted
         ]);
         if (!burstAlerted) {
-          _maybeAlertLoginBurst_(triggerName, email, c, CONFIG.BURST_WINDOW_MIN, evs[i].ts, last.ts, evs[i].key, last.key);
+          _maybeAlertLoginBurst_(triggerName, email, c, CONFIG.BURST_WINDOW_MIN, evs[i].ts, last.ts, evs[i].key, last.key, last.ip||'', last.isp||'');
           _markAlertedPermanently_(burstAlertKey);
         }
         i = j - 1;
@@ -258,7 +307,12 @@ function _refreshSuspicious_(triggerName) {
         e.lat = Number(parts[0]); e.lon = Number(parts[1]);
       } else { e.lat = NaN; e.lon = NaN; }
     });
-    const ok = byUser[email].filter(e => e.name === 'login_success' && _isCoord(e.lat) && _isCoord(e.lon));
+    // Guard against null-island (0,0): geo providers return 0,0 for unknown IPs,
+    // and 0 passes _isCoord (it's finite), so a failed lookup can masquerade as a
+    // real coordinate near the Gulf of Guinea and trip a false Impossible Travel.
+    // Dropping such events here means no pair is ever formed from bad coordinates.
+    // (NaN / blank / missing latlng are already rejected by _isCoord above.)
+    const ok = byUser[email].filter(e => e.name === 'login_success' && _isCoord(e.lat) && _isCoord(e.lon) && !(e.lat === 0 && e.lon === 0));
     for (let i=1;i<ok.length;i++) {
       const a = ok[i-1], b = ok[i];
       const miles = _haversineMi(a.lat,a.lon,b.lat,b.lon);
@@ -268,6 +322,7 @@ function _refreshSuspicious_(triggerName) {
         if (miles >= CONFIG.IMPOSSIBLE_MIN_MILES && mph >= CONFIG.IMPOSSIBLE_MPH) {
           if (_isWhitelisted_(email, a.ip) || _isWhitelisted_(email, b.ip)) continue;
           if (a.ip && b.ip && a.ip === b.ip) continue;
+          if (CONFIG.IGNORE_MOBILE_IMPOSSIBLE_TRAVEL && (_isMobileIsp_(a.isp) || _isMobileIsp_(b.isp))) continue;
           const details = 'dt=' + dtH.toFixed(2) + 'h, dist=' + miles.toFixed(0) + 'mi, speed≈' + mph.toFixed(0) + ' mph';
           const tail = _suspTail_(b.ts, 'Impossible Travel');
           const travelAlertKey = String(a.key) + '_' + String(b.key || '');
@@ -277,7 +332,9 @@ function _refreshSuspicious_(triggerName) {
             a.city||'', a.region||'', a.country||'', _fmtLatLng_(a.lat, a.lon),
             b.city||'', b.region||'', b.country||'', _fmtLatLng_(b.lat, b.lon),
             Number(miles.toFixed(1)), Number(mph.toFixed(0)), a.key, b.key,
-            ...tail, travelAlerted
+            ...tail,
+            a.ip||'', _cleanIsp_(a.isp||''), b.ip||'', _cleanIsp_(b.isp||''),
+            travelAlerted
           ]);
           if (!travelAlerted) {
             _maybeAlertImpossibleTravel_(triggerName, email, a, b, miles, mph);
@@ -291,13 +348,13 @@ function _refreshSuspicious_(triggerName) {
   const combined = out.concat(retained);
   _clearBody(shSusp); _setHeaders(shSusp, SUSP_HEADERS);
   if (combined.length) shSusp.getRange(2,1,combined.length,SUSP_HEADERS.length).setValues(combined);
-  _dedupeSheetByKey(shSusp, SUSP_HEADERS, SUSP_HEADERS.indexOf('Timestamp (CT)'));
   _dedupeByComposite_(shSusp, [1,2,3,16,17]);
 }
 
 // ===== Risk Scoring ===========================================================
 
 function getUserRiskScores() {
+  _requireLicensed_();
   _applyRuntimeConfig_();
   const ss      = SpreadsheetApp.getActive();
   const shMain  = ss.getSheetByName(CONFIG.MAIN);
@@ -329,6 +386,7 @@ function getUserRiskScores() {
       ensure(email);
       if (reason === 'Impossible Travel') scores[email] += 20;
       if (reason === 'Login Burst')       scores[email] += 15;
+      if (reason === 'Outside Safe States') scores[email] += 10;
     }
   }
 
@@ -337,12 +395,16 @@ function getUserRiskScores() {
 }
 
 function getUserRiskScore(email) {
+  _requireAllowedUser_();
+  _requireLicensed_();
   if (!email) return 0;
   const scores = getUserRiskScores();
   return scores[String(email).toLowerCase()] || 0;
 }
 
 function getUserRiskTrend(email) {
+  _requireAllowedUser_();
+  _requireLicensed_();
   if (!email) return [];
   email = String(email).toLowerCase();
   const ss      = SpreadsheetApp.getActive();
@@ -407,6 +469,7 @@ function getUserRiskTrend(email) {
       var reason = String(r[2] || '');
       if (reason === 'Impossible Travel') score += 20;
       if (reason === 'Login Burst')       score += 15;
+      if (reason === 'Outside Safe States') score += 10;
     });
     score = Math.min(100, score);
     return { week: wk.label, score: score };
@@ -414,6 +477,7 @@ function getUserRiskTrend(email) {
 }
 
 function getTopRiskUsers(n) {
+  _requireLicensed_();
   n = n || 5;
   const scores = getUserRiskScores();
   return Object.entries(scores)
