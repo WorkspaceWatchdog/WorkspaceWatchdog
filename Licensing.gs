@@ -5,27 +5,8 @@
  */
 
 const UPDATER = {
-  REPO_RAW: 'https://raw.githubusercontent.com/WorkspaceWatchdog/WorkspaceWatchdog/main',
-  VERSION_URL: 'https://raw.githubusercontent.com/WorkspaceWatchdog/WorkspaceWatchdog/main/version.json',
-  FILES: [
-    { name: 'Code',         filename: 'Code.gs',           type: 'SERVER_JS' },
-    { name: 'Utils',        filename: 'Utils.gs',           type: 'SERVER_JS' },
-    { name: 'Setup',        filename: 'Setup.gs',           type: 'SERVER_JS' },
-    { name: 'Sync',         filename: 'Sync.gs',            type: 'SERVER_JS' },
-    { name: 'Geo',          filename: 'Geo.gs',             type: 'SERVER_JS' },
-    { name: 'OrgUnit',      filename: 'OrgUnit.gs',         type: 'SERVER_JS' },
-    { name: 'Detection',    filename: 'Detection.gs',       type: 'SERVER_JS' },
-    { name: 'Alerts',       filename: 'Alerts.gs',          type: 'SERVER_JS' },
-    { name: 'Reports',      filename: 'Reports.gs',         type: 'SERVER_JS' },
-    { name: 'MapData',      filename: 'MapData.gs',         type: 'SERVER_JS' },
-    { name: 'Licensing',    filename: 'Licensing.gs',       type: 'SERVER_JS' },
-    { name: 'Archive',      filename: 'Archive.gs',         type: 'SERVER_JS' },
-    { name: 'YearEnd',      filename: 'YearEnd.gs',         type: 'SERVER_JS' },
-    { name: 'SetupWizard',  filename: 'SetupWizard.html',   type: 'HTML'      },
-    { name: 'Settings',     filename: 'Settings.html',      type: 'HTML'      },
-    { name: 'Updates',      filename: 'Updates.html',       type: 'HTML'      },
-    { name: 'LiveMap',      filename: 'LiveMap.html',        type: 'HTML'      }
-  ],
+  BASE_URL: 'https://workspace-watchdog-update.wild-credit-7442.workers.dev',
+  VERSION_URL: 'https://workspace-watchdog-update.wild-credit-7442.workers.dev/version.json',
   PROP_VERSION:    'WW_INSTALLED_VERSION',
   PROP_LAST_CHECK: 'WW_LAST_UPDATE_CHECK'
 };
@@ -284,11 +265,22 @@ function saveInstalledVersion(version) {
 
 function checkForUpdates() {
   try {
-    const resp = UrlFetchApp.fetch(UPDATER.VERSION_URL, { muteHttpExceptions: true });
+    const resp = UrlFetchApp.fetch(UPDATER.VERSION_URL, {
+      muteHttpExceptions: true,
+      deadline: 10
+    });
+
     if (resp.getResponseCode() !== 200) {
-      return { error: 'Could not reach GitHub (HTTP ' + resp.getResponseCode() + '). Check your network or repo name.' };
+      return {
+        error: 'Could not reach the Workspace Watchdog update service (HTTP ' +
+          resp.getResponseCode() + ').'
+      };
     }
-    const remote = JSON.parse(resp.getContentText());
+
+    const remote = JSON.parse(resp.getContentText() || '{}');
+    const manifestError = _validateUpdateManifest_(remote);
+    if (manifestError) return { error: 'Update manifest is invalid: ' + manifestError };
+
     const installed = getInstalledVersion();
 
     PropertiesService.getScriptProperties().setProperty(
@@ -298,10 +290,11 @@ function checkForUpdates() {
 
     return {
       installedVersion: installed,
-      latestVersion:    remote.version,
-      released:         remote.released  || '',
-      changelog:        remote.changelog || [],
-      upToDate:         _versionCompare_(installed, remote.version) >= 0
+      latestVersion: remote.version,
+      released: remote.released || '',
+      changelog: remote.changelog || [],
+      message: remote.message || '',
+      upToDate: _versionCompare_(installed, remote.version) >= 0
     };
   } catch (e) {
     return { error: 'Update check failed: ' + e.message };
@@ -310,98 +303,240 @@ function checkForUpdates() {
 
 function getVersionInfo() {
   _requireAllowedUser_();
+
   try {
-    const resp = UrlFetchApp.fetch(UPDATER.VERSION_URL, { muteHttpExceptions: true, deadline: 5 });
-    if (resp.getResponseCode() === 200) return JSON.parse(resp.getContentText());
-  } catch(e) {}
-  return null;
+    const resp = UrlFetchApp.fetch(UPDATER.VERSION_URL, {
+      muteHttpExceptions: true,
+      deadline: 10
+    });
+
+    if (resp.getResponseCode() !== 200) return null;
+
+    const remote = JSON.parse(resp.getContentText() || '{}');
+    return _validateUpdateManifest_(remote) ? null : remote;
+  } catch (e) {
+    return null;
+  }
 }
 
 function applyUpdate() {
   try {
     if (_isLicenseProductBlocked_(_getLicenseState_())) {
-      return { ok: false, message: 'Updates are paused because there is no active Workspace Watchdog license. Activate or renew your license to resume updates.' };
+      return {
+        ok: false,
+        message: 'Updates are paused because there is no active Workspace Watchdog license. Activate or renew your license to resume updates.'
+      };
     }
 
-    const versionResp = UrlFetchApp.fetch(UPDATER.VERSION_URL, { muteHttpExceptions: true });
+    const versionResp = UrlFetchApp.fetch(UPDATER.VERSION_URL, {
+      muteHttpExceptions: true,
+      deadline: 10
+    });
+
     if (versionResp.getResponseCode() !== 200) {
-      return { ok: false, message: 'Could not fetch version info from GitHub.' };
+      return {
+        ok: false,
+        message: 'Could not fetch version info from the Workspace Watchdog update service (HTTP ' +
+          versionResp.getResponseCode() + ').'
+      };
     }
-    const remote = JSON.parse(versionResp.getContentText());
 
-    const requests = UPDATER.FILES.map(f => ({
-      url: UPDATER.REPO_RAW + '/' + f.filename,
-      muteHttpExceptions: true
-    }));
+    const remote = JSON.parse(versionResp.getContentText() || '{}');
+    const manifestError = _validateUpdateManifest_(remote);
+    if (manifestError) {
+      return { ok: false, message: 'Update manifest is invalid: ' + manifestError };
+    }
+
+    const releasePath = _normalizeReleasePathClient_(remote.releasePath);
+    const manifestFiles = remote.files.slice();
+
+    const requests = manifestFiles.map(function(filename) {
+      return {
+        url: UPDATER.BASE_URL + '/' + releasePath + encodeURIComponent(filename),
+        muteHttpExceptions: true,
+        deadline: 30
+      };
+    });
+
     const responses = UrlFetchApp.fetchAll(requests);
 
     for (let i = 0; i < responses.length; i++) {
-      if (responses[i].getResponseCode() !== 200) {
-        return { ok: false, message: 'Failed to fetch ' + UPDATER.FILES[i].filename + ' from GitHub (HTTP ' + responses[i].getResponseCode() + ').' };
+      const code = responses[i].getResponseCode();
+      if (code !== 200) {
+        return {
+          ok: false,
+          message: 'Failed to fetch ' + manifestFiles[i] +
+            ' from the Workspace Watchdog update service (HTTP ' + code + ').'
+        };
       }
     }
 
-    const files = UPDATER.FILES.map((f, i) => ({
-      name:   f.name,
-      type:   f.type,
-      source: responses[i].getContentText()
-    }));
+    const files = [];
+    for (let i = 0; i < manifestFiles.length; i++) {
+      const fileDef = _appsScriptFileDefinition_(manifestFiles[i]);
 
-    try {
-      const manifestResp = UrlFetchApp.fetch(
-        UPDATER.REPO_RAW + '/appsscript.json',
-        { muteHttpExceptions: true }
-      );
-      if (manifestResp.getResponseCode() === 200) {
-        files.push({ name: 'appsscript', type: 'JSON', source: manifestResp.getContentText() });
+      if (!fileDef) {
+        return {
+          ok: false,
+          message: 'Unsupported file in update manifest: ' + manifestFiles[i]
+        };
       }
-    } catch(e) { /* manifest optional */ }
+
+      files.push({
+        name: fileDef.name,
+        type: fileDef.type,
+        source: responses[i].getContentText()
+      });
+    }
+
+    if (!manifestFiles.some(function(f) {
+      return String(f).toLowerCase() === 'appsscript.json';
+    })) {
+      return {
+        ok: false,
+        message: 'Update manifest is missing appsscript.json. Update cancelled for safety.'
+      };
+    }
 
     const scriptId = ScriptApp.getScriptId();
-    const token    = ScriptApp.getOAuthToken();
-    const apiUrl   = 'https://script.googleapis.com/v1/projects/' + scriptId + '/content';
+    const token = ScriptApp.getOAuthToken();
+    const apiUrl = 'https://script.googleapis.com/v1/projects/' + scriptId + '/content';
+
+    const props = PropertiesService.getScriptProperties();
+    const previousInstalledVersion = props.getProperty(UPDATER.PROP_VERSION) || '';
+    const previousInstallVersion = props.getProperty('INSTALL_VERSION') || '';
+
+    saveInstalledVersion(remote.version);
+    props.setProperty('INSTALL_VERSION', remote.version);
+
+    const setupSheet = SpreadsheetApp.getActive().getSheetByName('Setup');
+    const previousSetupVersion = setupSheet ? setupSheet.getRange('B2').getValue() : '';
+    if (setupSheet) setupSheet.getRange('B2').setValue(remote.version);
 
     const apiResp = UrlFetchApp.fetch(apiUrl, {
-      method:  'PUT',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      payload:            JSON.stringify({ files }),
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      payload: JSON.stringify({ files: files }),
       muteHttpExceptions: true
     });
 
     const apiCode = apiResp.getResponseCode();
+
     if (apiCode !== 200) {
+      if (previousInstalledVersion) {
+        props.setProperty(UPDATER.PROP_VERSION, previousInstalledVersion);
+      } else {
+        props.deleteProperty(UPDATER.PROP_VERSION);
+      }
+
+      if (previousInstallVersion) {
+        props.setProperty('INSTALL_VERSION', previousInstallVersion);
+      } else {
+        props.deleteProperty('INSTALL_VERSION');
+      }
+
+      if (setupSheet) setupSheet.getRange('B2').setValue(previousSetupVersion);
+
       const body = apiResp.getContentText();
-      if (body.indexOf('Apps Script API has not been used') !== -1 ||
-          body.indexOf('accessNotConfigured') !== -1) {
+
+      if (
+        body.indexOf('Apps Script API has not been used') !== -1 ||
+        body.indexOf('accessNotConfigured') !== -1
+      ) {
         return { ok: false, message: 'ENABLE_API', scriptId: scriptId };
       }
-      return { ok: false, message: 'Apps Script API returned HTTP ' + apiCode + ': ' + body };
+
+      return {
+        ok: false,
+        message: 'Apps Script API returned HTTP ' + apiCode + ': ' + body
+      };
     }
 
-    saveInstalledVersion(remote.version);
-    PropertiesService.getScriptProperties().setProperty('INSTALL_VERSION', remote.version);
-
-    // Keep the visible Setup sheet version synchronized with the installed build.
-    const setupSheet = SpreadsheetApp.getActive().getSheetByName('Setup');
-    if (setupSheet) setupSheet.getRange('B2').setValue(remote.version);
-
     return {
-      ok:      true,
+      ok: true,
       message: 'Successfully updated to v' + remote.version + '. Please reload the spreadsheet.',
       version: remote.version
     };
+
   } catch (e) {
     return { ok: false, message: 'Update failed: ' + e.message };
   }
 }
 
+function _validateUpdateManifest_(remote) {
+  if (!remote || typeof remote !== 'object') return 'missing manifest';
+  if (!remote.version || typeof remote.version !== 'string') return 'missing version';
+  if (!remote.releasePath || typeof remote.releasePath !== 'string') return 'missing releasePath';
+
+  const releasePath = _normalizeReleasePathClient_(remote.releasePath);
+  if (!releasePath) return 'invalid releasePath';
+
+  if (!Array.isArray(remote.files) || remote.files.length === 0) return 'missing files list';
+
+  const seen = {};
+  for (let i = 0; i < remote.files.length; i++) {
+    const filename = String(remote.files[i] || '').trim();
+
+    if (
+      !filename ||
+      filename.indexOf('/') !== -1 ||
+      filename.indexOf('\') !== -1 ||
+      filename.indexOf('..') !== -1
+    ) {
+      return 'invalid filename: ' + filename;
+    }
+
+    if (!_appsScriptFileDefinition_(filename)) return 'unsupported file type: ' + filename;
+
+    const key = filename.toLowerCase();
+    if (seen[key]) return 'duplicate filename: ' + filename;
+    seen[key] = true;
+  }
+
+  return '';
+}
+
+function _normalizeReleasePathClient_(value) {
+  let path = String(value || '').trim().replace(/^\/+/, '');
+
+  if (!path || path.indexOf('..') !== -1 || path.indexOf('\') !== -1) return '';
+  if (!/^releases\/[A-Za-z0-9._-]+\/?$/.test(path)) return '';
+
+  if (!path.endsWith('/')) path += '/';
+  return path;
+}
+
+function _appsScriptFileDefinition_(filename) {
+  const file = String(filename || '').trim();
+  const lower = file.toLowerCase();
+
+  if (lower === 'appsscript.json') {
+    return { name: 'appsscript', type: 'JSON' };
+  }
+
+  if (lower.endsWith('.gs')) {
+    return { name: file.substring(0, file.length - 3), type: 'SERVER_JS' };
+  }
+
+  if (lower.endsWith('.html')) {
+    return { name: file.substring(0, file.length - 5), type: 'HTML' };
+  }
+
+  return null;
+}
+
 function _versionCompare_(a, b) {
   const pa = String(a).split('.').map(Number);
   const pb = String(b).split('.').map(Number);
+
   for (let i = 0; i < 3; i++) {
     const diff = (pa[i] || 0) - (pb[i] || 0);
     if (diff !== 0) return diff;
   }
+
   return 0;
 }
 
@@ -410,5 +545,9 @@ function showUpdatesPanel() {
     .setTitle('Workspace Watchdog — Updates')
     .setWidth(620)
     .setHeight(580);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Workspace Watchdog — Updates');
+
+  SpreadsheetApp.getUi().showModalDialog(
+    html,
+    'Workspace Watchdog — Updates'
+  );
 }
