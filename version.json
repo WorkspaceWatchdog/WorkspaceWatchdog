@@ -1,15 +1,11 @@
 {
-  "version": "3.7.2",
-  "released": "2026-10-05",
+  "version": "3.7.3",
+  "released": "2026-10-14",
+  "channel": "production",
+  "message": "Workspace Watchdog secure update workflow migration",
   "changelog": [
-    "Fixed Live Map view dropdown so Main, Active Now, and Suspicious are visible and selectable again",
-    "Setup sheet version now stays synchronized with the installed Workspace Watchdog version after updates and reloads",
-    "Fresh and fast installs now initialize the updater version property so version checks and the Setup sheet agree",
-    "Standardized the internal monitor version and release metadata on 3.7.2",
-    "Hardened license enforcement across scheduled sync, manual sync, backfill, reports, Live Map data endpoints, raw data API access, and maintenance functions",
-    "Expired trial licenses now shut down immediately instead of continuing through a trial grace period",
-    "Unlicensed installations are now blocked from running Workspace Watchdog monitoring functions",
-    "Paid licenses retain the existing 30-day grace period after expiration",
-    "Improved expired-license revalidation caching so expired installations do not repeatedly contact the license server on every open or sync"
+    "Migrated Workspace Watchdog updates to the new secure update service.",
+    "Prepared installations for private, versioned update delivery.",
+    "No changes to licensing behavior or monitoring functionality."
   ]
 }
